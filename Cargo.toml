@@ -2,10 +2,15 @@
 name = "cubi-backend"
 version = "0.1.0"
 edition = "2021"
+default-run = "cubi-backend"
 
 [[bin]]
 name = "cubi-backend"
 path = "src/main.rs"
+
+[[bin]]
+name = "seed"
+path = "src/seed.rs"
 
 [dependencies]
 # Framework HTTP async
