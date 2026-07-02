@@ -28,10 +28,12 @@ impl Config {
             smtp_user: required("SMTP_USER")?,
             smtp_password: required("SMTP_PASSWORD")?,
             app_env: std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
-            app_port: std::env::var("APP_PORT")
+            // Render injecte PORT, fallback sur APP_PORT puis 3000
+            app_port: std::env::var("PORT")
+                .or_else(|_| std::env::var("APP_PORT"))
                 .unwrap_or_else(|_| "3000".to_string())
                 .parse()
-                .context("APP_PORT doit être un entier")?,
+                .context("PORT doit être un entier")?,
         })
     }
 }
