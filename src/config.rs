@@ -11,6 +11,7 @@ pub struct Config {
     pub smtp_password: String,
     pub app_env: String,
     pub app_port: u16,
+    pub frontend_url: String,
 }
 
 impl Config {
@@ -28,6 +29,8 @@ impl Config {
             smtp_user: required("SMTP_USER")?,
             smtp_password: required("SMTP_PASSWORD")?,
             app_env: std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
+            frontend_url: std::env::var("FRONTEND_URL")
+                .unwrap_or_else(|_| "http://localhost:5173".to_string()),
             // Render injecte PORT, fallback sur APP_PORT puis 3000
             app_port: std::env::var("PORT")
                 .or_else(|_| std::env::var("APP_PORT"))

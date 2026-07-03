@@ -34,6 +34,10 @@ pub struct CreateUserRequest {
 #[derive(Serialize)]
 pub struct CreateUserResponse {
     pub utilisateur_id: Uuid,
+    /// Token de reset inclus en dev ou si l'email échoue
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reset_token: Option<String>,
+    pub reset_link: String,
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -124,19 +128,25 @@ pub async fn create_user(
     };
     let token_temp = generate_temp_jwt(&utilisateur_tmp, &config)?;
 
-    // Envoi de l'email de bienvenue (ne bloque pas si l'envoi échoue en dev)
-    if let Err(e) = send_welcome_email(&config, &body.email, &body.prenom, &mot_de_passe_temp, &token_temp).await {
-        tracing::warn!("Échec envoi email de bienvenue pour {}: {e}", body.email);
-    }
+    let reset_link = format!("{}/reset-password?token={}", config.frontend_url, token_temp);
 
-    tracing::info!(
-        user_id = %user_id,
-        created_by = %auth_user.user_id,
-        "Utilisateur créé"
-    );
+    // Envoi de l'email de bienvenue (ne bloque pas si l'envoi échoue)
+    let email_ok = send_welcome_email(&config, &body.email, &body.prenom, &mot_de_passe_temp, &token_temp, &config.frontend_url).await;
+    let reset_token_expose = match &email_ok {
+        Ok(_) => None,
+        Err(e) => {
+            tracing::warn!("Échec envoi email pour {}: {e}", body.email);
+            // En cas d'échec email : on retourne le token dans la réponse API
+            Some(token_temp.clone())
+        }
+    };
+
+    tracing::info!(user_id = %user_id, created_by = %auth_user.user_id, "Utilisateur créé");
 
     Ok(Json(CreateUserResponse {
         utilisateur_id: user_id,
+        reset_token: reset_token_expose,
+        reset_link,
     }))
 }
 
@@ -198,16 +208,18 @@ async fn send_welcome_email(
     prenom: &str,
     mot_de_passe: &str,
     token_reset: &str,
+    frontend_url: &str,
 ) -> Result<(), AppError> {
+    let reset_link = format!("{frontend_url}/reset-password?token={token_reset}");
     let body = format!(
         "Bonjour {prenom},\n\n\
-         Votre compte Cubi a été créé.\n\n\
+         Votre compte CUBI a été créé par un administrateur.\n\n\
          Email : {email}\n\
          Mot de passe temporaire : {mot_de_passe}\n\n\
-         Vous devez réinitialiser votre mot de passe lors de votre première connexion.\n\
-         Token de réinitialisation (à fournir à POST /auth/reset-password) :\n\
-         {token_reset}\n\n\
-         L'équipe Cubi"
+         Vous devez définir votre mot de passe définitif en cliquant sur ce lien :\n\
+         {reset_link}\n\n\
+         Ce lien est valable 48h.\n\n\
+         L'équipe CUBI"
     );
 
     let message = Message::builder()
