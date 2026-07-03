@@ -224,7 +224,7 @@ async fn send_welcome_email(
 
     let message = Message::builder()
         .from(
-            "Cubi <onboarding@resend.dev>"
+            format!("Cubi <{}>", config.smtp_user)
                 .parse()
                 .map_err(|e| AppError::InternalError(anyhow::anyhow!("Email from invalide : {e}")))?,
         )
