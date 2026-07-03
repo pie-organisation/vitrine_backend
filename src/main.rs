@@ -18,15 +18,13 @@ use tower_http::{
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use middleware::{auth::require_admin, auth::require_auth, session_guard::no_active_session};
-use routes::{admin, auth, licences, sessions, users};
+use routes::{admin, auth, licences, school, sessions, users};
 use state::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Chargement du fichier .env (silencieux si absent en production)
     let _ = dotenvy::dotenv();
 
-    // Initialisation des logs structurés avec filtre via RUST_LOG
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .with(tracing_subscriber::fmt::layer())
@@ -35,7 +33,6 @@ async fn main() -> anyhow::Result<()> {
     let config = config::Config::from_env()?;
     let pool = db::create_pool(&config.database_url).await?;
 
-    // Application des migrations SQLx au démarrage
     sqlx::migrate!("./migrations").run(&pool).await?;
     tracing::info!("Migrations appliquées");
 
@@ -54,44 +51,78 @@ fn build_router(app_state: AppState) -> Router {
     let jwt_secret = app_state.config.jwt_secret.clone();
     let pool = app_state.pool.clone();
 
-    // Routes publiques : pas d'authentification requise
+    // ── Routes publiques (sans auth) ──────────────────────────────────────────
     let public_routes = Router::new()
-        .route("/auth/login", post(auth::login))
+        .route("/auth/login",        post(auth::login))
+        .route("/auth/inscription",  post(auth::inscription))
         .route("/auth/reset-password", post(auth::reset_password));
 
-    // Routes protégées : JWT obligatoire
-    // session_guard (no_active_session) est appliqué uniquement sur /sessions/open
+    // ── Routes protégées (JWT requis) ─────────────────────────────────────────
     let session_open = Router::new()
         .route("/sessions/open", post(sessions::open_session))
-        .layer(axum_middleware::from_fn_with_state(
-            pool.clone(),
-            no_active_session,
-        ));
+        .layer(axum_middleware::from_fn_with_state(pool.clone(), no_active_session));
 
     let protected_routes = Router::new()
         .merge(session_open)
-        .route("/sessions/close", post(sessions::close_session))
-        .route("/licences", get(licences::list_licences))
-        .route("/licences/:id/assign", patch(licences::assign_licence))
-        .route("/licences/:id/unassign", patch(licences::unassign_licence))
-        // require_auth est la couche la plus externe → s'exécute en premier
-        .layer(axum_middleware::from_fn_with_state(
-            jwt_secret.clone(),
-            require_auth,
-        ));
+        .route("/me",                      get(users::me))
+        .route("/sessions/close",          post(sessions::close_session))
+        .route("/licences",                get(licences::list_licences))
+        .route("/licences/:id/assign",     patch(licences::assign_licence))
+        .route("/licences/:id/unassign",   patch(licences::unassign_licence))
+        // School routes
+        .route("/school/organisation",     get(school::get_organisation))
+        .route("/school/comptes",          get(school::list_comptes))
+        .route("/school/comptes",          post(school::create_compte))
+        .route("/school/comptes/:id",      patch(school::update_compte))
+        .route("/school/comptes/:id",      delete(school::delete_compte))
+        .route("/school/factures",         get(school::list_factures))
+        .route("/school/activite",         get(school::list_activite))
+        .route("/school/contact",          get(school::get_contact))
+        .route("/school/contact",          patch(school::update_contact))
+        .layer(axum_middleware::from_fn_with_state(jwt_secret.clone(), require_auth));
 
-    // Routes admin : JWT + vérification du rôle admin
-    // Ordre d'exécution : require_auth → require_admin → handler
+    // ── Routes admin (JWT + rôle admin) ──────────────────────────────────────
     let admin_routes = Router::new()
-        .route("/admin/dashboard", get(admin::dashboard))
-        .route("/admin/users", post(users::create_user))
-        .route("/admin/users", get(users::list_users))
-        .route("/admin/users/:id/suspend", delete(users::suspend_user))
+        .route("/admin/dashboard",             get(admin::dashboard))
+        .route("/admin/metriques",             get(admin::metriques))
+        .route("/admin/alertes",               get(admin::alertes))
+        .route("/admin/analytiques",           get(admin::analytiques))
+        // Organisations
+        .route("/admin/organisations",         get(admin::list_organisations))
+        .route("/admin/organisations/:id",     get(admin::get_organisation))
+        // Plans
+        .route("/admin/plans",                 get(admin::list_plans))
+        .route("/admin/plans",                 post(admin::create_plan))
+        .route("/admin/plans/:id",             patch(admin::update_plan))
+        .route("/admin/plans/:id",             delete(admin::delete_plan))
+        // Demandes d'inscription
+        .route("/admin/demandes",              get(admin::list_demandes))
+        .route("/admin/demandes/:id",          patch(admin::update_demande))
+        // Sessions
+        .route("/admin/sessions",              get(admin::list_sessions))
+        .route("/admin/sessions/:id",          delete(admin::terminate_session))
+        // Factures
+        .route("/admin/factures",              get(admin::list_factures))
+        // Journaux
+        .route("/admin/journaux",              get(admin::list_journaux))
+        // Équipe
+        .route("/admin/equipe",                get(admin::list_equipe))
+        .route("/admin/equipe",                post(admin::invite_equipe))
+        .route("/admin/equipe/:id",            patch(admin::update_equipe))
+        .route("/admin/equipe/:id",            delete(admin::delete_equipe))
+        // Messages
+        .route("/admin/messages",              get(admin::list_messages))
+        .route("/admin/messages/:id",          patch(admin::update_message))
+        // Offres
+        .route("/admin/offres",                get(admin::list_offres))
+        .route("/admin/offres",                post(admin::create_offre))
+        .route("/admin/offres/:id",            patch(admin::update_offre))
+        // Utilisateurs
+        .route("/admin/users",                 post(users::create_user))
+        .route("/admin/users",                 get(users::list_users))
+        .route("/admin/users/:id/suspend",     delete(users::suspend_user))
         .layer(axum_middleware::from_fn(require_admin))
-        .layer(axum_middleware::from_fn_with_state(
-            jwt_secret,
-            require_auth,
-        ));
+        .layer(axum_middleware::from_fn_with_state(jwt_secret, require_auth));
 
     Router::new()
         .merge(public_routes)

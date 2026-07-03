@@ -41,7 +41,63 @@ pub struct ResetPasswordResponse {
     pub message: String,
 }
 
+// ── DTOs inscription ─────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct InscriptionRequest {
+    /// "ecole" | "groupe"
+    pub r#type: String,
+    pub nom: String,
+    pub email: String,
+    pub mot_de_passe: Option<String>,
+    pub siret: Option<String>,
+    pub nom_daf: Option<String>,
+    pub prenom_daf: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct InscriptionResponse {
+    pub message: String,
+}
+
 // ── Handlers ─────────────────────────────────────────────────────────────────
+
+/// POST /auth/inscription
+/// Soumet une demande d'inscription (statut en_attente, traitée par un admin).
+pub async fn inscription(
+    State(pool): State<PgPool>,
+    Json(body): Json<InscriptionRequest>,
+) -> Result<Json<InscriptionResponse>, AppError> {
+    // On utilise le premier type_licence disponible comme valeur par défaut
+    let type_licence_id: uuid::Uuid = sqlx::query_scalar(
+        "SELECT id FROM type_licence WHERE actif = TRUE ORDER BY sessions_min LIMIT 1",
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::InternalError(anyhow::anyhow!("Aucun type_licence disponible")))?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO demande_inscription
+            (type_demande, nom_siege_ou_ecole, nom_daf, prenom_daf, siret, type_licence_id, statut)
+        VALUES ($1, $2, $3, $4, $5, $6, 'en_attente')
+        "#,
+    )
+    .bind(&body.r#type)
+    .bind(&body.nom)
+    .bind(&body.nom_daf)
+    .bind(&body.prenom_daf)
+    .bind(&body.siret)
+    .bind(type_licence_id)
+    .execute(&pool)
+    .await?;
+
+    tracing::info!(email = %body.email, "Demande d'inscription soumise");
+
+    Ok(Json(InscriptionResponse {
+        message: "Votre demande a été reçue. Un administrateur la traitera sous 48h.".to_string(),
+    }))
+}
 
 /// POST /auth/login
 /// Authentifie un utilisateur et retourne un JWT valide 24h.

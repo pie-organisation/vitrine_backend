@@ -38,6 +38,23 @@ pub struct CreateUserResponse {
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
+/// GET /me
+/// Retourne le profil de l'utilisateur authentifié.
+pub async fn me(
+    State(pool): State<PgPool>,
+    Extension(auth_user): Extension<AuthUser>,
+) -> Result<Json<Utilisateur>, AppError> {
+    let user = sqlx::query_as::<_, Utilisateur>(
+        "SELECT * FROM utilisateur WHERE id = $1",
+    )
+    .bind(auth_user.user_id)
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Utilisateur introuvable".to_string()))?;
+
+    Ok(Json(user))
+}
+
 /// POST /admin/users
 /// Crée un utilisateur avec un mot de passe temporaire et lui envoie les identifiants par email.
 /// Réservé aux admins (garanti par le middleware require_admin).
