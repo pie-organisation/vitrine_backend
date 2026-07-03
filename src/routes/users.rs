@@ -243,11 +243,12 @@ async fn send_welcome_email(
             config.smtp_user.clone(),
             config.smtp_password.clone(),
         ))
+        .timeout(Some(std::time::Duration::from_secs(10)))
         .build();
 
-    mailer
-        .send(message)
+    tokio::time::timeout(std::time::Duration::from_secs(12), mailer.send(message))
         .await
+        .map_err(|_| AppError::InternalError(anyhow::anyhow!("Timeout envoi email")))?
         .map_err(|e| AppError::InternalError(anyhow::anyhow!("Envoi email : {e}")))?;
 
     Ok(())
