@@ -2,9 +2,11 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
+const swaggerUi = require('swagger-ui-express');
 const pool = require('./db');
 const config = require('./config');
 const runMigrations = require('./migrate');
+const swaggerSpec = require('./swagger');
 const { requireAuth, requireAdmin } = require('./middleware/auth');
 
 const authRouter     = require('./routes/auth');
@@ -17,6 +19,10 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+// ── Swagger UI ────────────────────────────────────────────────────────────────
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+app.get('/', (req, res) => res.redirect('/api-docs'));
 
 // ── Routes publiques ──────────────────────────────────────────────────────────
 app.use('/auth', authRouter);
