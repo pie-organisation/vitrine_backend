@@ -34,14 +34,29 @@ router.post('/login', async (req, res, next) => {
   try {
     const { email, mot_de_passe } = req.body;
 
+    // TEMP DEBUG — à retirer une fois le 401 élucidé
+    console.log('[DEBUG login] content-type=%s body-keys=%s email=%j mdp-len=%s',
+      req.headers['content-type'], Object.keys(req.body || {}), email, mot_de_passe ? mot_de_passe.length : 'undefined');
+    console.log('[DEBUG login] db-host=%s', (() => {
+      try { return new URL(config.databaseUrl).host; } catch { return 'PARSE_ERROR'; }
+    })());
+
     const { rows } = await pool.query(
       "SELECT * FROM utilisateur WHERE email = $1 AND statut = 'actif'",
       [email]
     );
+
+    console.log('[DEBUG login] rows-found=%d', rows.length);
     if (!rows.length) return res.status(401).json({ error: 'Identifiants invalides' });
 
     const user = rows[0];
+    console.log('[DEBUG login] hash-len=%s hash-prefix=%s mdp_temporaire=%s statut=%s',
+      user.mot_de_passe_hash ? user.mot_de_passe_hash.length : 'null',
+      user.mot_de_passe_hash ? user.mot_de_passe_hash.slice(0, 10) : 'null',
+      user.mdp_temporaire, user.statut);
+
     const valid = await bcrypt.compare(mot_de_passe, user.mot_de_passe_hash);
+    console.log('[DEBUG login] bcrypt-compare-result=%s', valid);
     if (!valid) return res.status(401).json({ error: 'Identifiants invalides' });
 
     if (user.mdp_temporaire) {
