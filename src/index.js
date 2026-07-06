@@ -84,16 +84,15 @@ async function seedAdminIfMissing() {
   const ecoleId = ecoleRows[0].id;
 
   const hash = await bcrypt.hash('admin123', 12);
-  await pool.query(
+  const { rowCount } = await pool.query(
     `INSERT INTO utilisateur (ecole_id, nom, prenom, email, mot_de_passe_hash, mdp_temporaire, role, statut)
      VALUES ($1, 'Admin', 'CUBI', 'admin@cubi.fr', $2, FALSE, 'admin', 'actif')
-     ON CONFLICT (email) DO UPDATE
-       SET mot_de_passe_hash = EXCLUDED.mot_de_passe_hash,
-           mdp_temporaire    = FALSE,
-           statut            = 'actif'`,
+     ON CONFLICT (email) DO NOTHING`,
     [ecoleId, hash]
   );
-  console.log('Admin prêt : admin@cubi.fr / admin123');
+  if (rowCount > 0) {
+    console.log('Admin prêt : admin@cubi.fr / admin123');
+  }
 }
 
 start().catch(err => {
