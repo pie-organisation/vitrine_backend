@@ -1,7 +1,6 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const bcrypt = require('bcryptjs');
 const swaggerUi = require('swagger-ui-express');
 const pool = require('./db');
 const config = require('./config');
@@ -60,39 +59,9 @@ async function start() {
   await runMigrations();
   console.log('Migrations appliquées');
 
-  await seedAdminIfMissing();
-
   app.listen(config.appPort, '0.0.0.0', () => {
     console.log(`Serveur Cubi démarré sur le port ${config.appPort}`);
   });
-}
-
-async function seedAdminIfMissing() {
-  const { rows: tlRows } = await pool.query(
-    "SELECT id FROM type_licence ORDER BY sessions_min LIMIT 1"
-  );
-  if (!tlRows.length) return;
-  const typeLicenceId = tlRows[0].id;
-
-  const { rows: ecoleRows } = await pool.query(
-    `INSERT INTO ecole (nom_complet_ecole, siret, adresse, code_postal, ville, type_licence_id, mot_de_passe_hash, statut)
-     VALUES ('CUBI Admin', '00000000000001', '1 rue CUBI', '75001', 'Paris', $1, 'n/a', 'actif')
-     ON CONFLICT (siret) DO UPDATE SET nom_complet_ecole = EXCLUDED.nom_complet_ecole
-     RETURNING id`,
-    [typeLicenceId]
-  );
-  const ecoleId = ecoleRows[0].id;
-
-  const hash = await bcrypt.hash('admin123', 12);
-  const { rowCount } = await pool.query(
-    `INSERT INTO utilisateur (ecole_id, nom, prenom, email, mot_de_passe_hash, mdp_temporaire, role, statut)
-     VALUES ($1, 'Admin', 'CUBI', 'admin@cubi.fr', $2, FALSE, 'admin', 'actif')
-     ON CONFLICT (email) DO NOTHING`,
-    [ecoleId, hash]
-  );
-  if (rowCount > 0) {
-    console.log('Admin prêt : admin@cubi.fr / admin123');
-  }
 }
 
 start().catch(err => {
