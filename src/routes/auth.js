@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const argon2 = require('argon2');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../db');
 const config = require('../config');
@@ -41,7 +41,7 @@ router.post('/login', async (req, res, next) => {
     if (!rows.length) return res.status(401).json({ error: 'Identifiants invalides' });
 
     const user = rows[0];
-    const valid = await argon2.verify(user.mot_de_passe_hash, mot_de_passe);
+    const valid = await bcrypt.compare(mot_de_passe, user.mot_de_passe_hash);
     if (!valid) return res.status(401).json({ error: 'Identifiants invalides' });
 
     if (user.mdp_temporaire) {
@@ -71,7 +71,7 @@ router.post('/reset-password', async (req, res, next) => {
       return res.status(401).json({ error: 'Token invalide ou expiré' });
     }
 
-    const hash = await argon2.hash(nouveau_mot_de_passe);
+    const hash = await bcrypt.hash(nouveau_mot_de_passe, 12);
     const { rowCount } = await pool.query(
       `UPDATE utilisateur
        SET mot_de_passe_hash = $1, mdp_temporaire = FALSE

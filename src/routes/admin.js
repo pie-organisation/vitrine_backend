@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const { randomUUID } = require('crypto');
-const argon2 = require('argon2');
+const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const pool = require('../db');
 const config = require('../config');
@@ -228,7 +228,7 @@ router.post('/users', async (req, res, next) => {
     }
 
     const tempPassword = generateTempPassword();
-    const hash = await argon2.hash(tempPassword);
+    const hash = await bcrypt.hash(tempPassword, 12);
     const userId = randomUUID();
 
     await pool.query(
