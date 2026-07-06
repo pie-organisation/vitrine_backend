@@ -241,19 +241,21 @@ router.post('/users', async (req, res, next) => {
     const tokenTemp = generateTempJwt({ id: userId, ecole_id: req.auth.ecoleId, role });
     const resetLink = `${config.frontendUrl}/reset-password?token=${tokenTemp}`;
 
-    let resetToken = null;
-    try {
-      await sendWelcomeEmail(email, prenom, tempPassword, tokenTemp, config.frontendUrl);
-    } catch (e) {
-      console.warn(`Échec envoi email pour ${email}: ${e.message}`);
-      resetToken = tokenTemp;
-    }
+    const EMAIL_WAIT_MS = 2000;
+    const emailPromise = sendWelcomeEmail(email, prenom, tempPassword, tokenTemp, config.frontendUrl)
+      .then(() => true)
+      .catch(e => {
+        console.warn(`Échec envoi email pour ${email}: ${e.message}`);
+        return false;
+      });
+    const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), EMAIL_WAIT_MS));
+    const emailSent = await Promise.race([emailPromise, timeoutPromise]);
 
     console.log(`Utilisateur créé : ${userId} par ${req.auth.userId}`);
     res.json({
       utilisateur_id: userId,
       reset_link: resetLink,
-      ...(resetToken ? { reset_token: resetToken } : {}),
+      ...(emailSent ? {} : { reset_token: tokenTemp }),
     });
   } catch (err) { next(err); }
 });
