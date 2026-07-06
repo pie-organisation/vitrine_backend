@@ -6,18 +6,15 @@ API REST du projet **Cubi** — gestion des licences, sessions et utilisateurs p
 
 | Couche | Technologie |
 |--------|-------------|
-| Langage | Rust (édition 2021) |
-| Framework HTTP | [Axum](https://github.com/tokio-rs/axum) 0.7 |
-| Runtime async | Tokio |
-| Base de données | PostgreSQL via [SQLx](https://github.com/launchbadge/sqlx) 0.8 |
+| Langage | Node.js |
+| Framework HTTP | [Express](https://expressjs.com) 4 |
+| Base de données | PostgreSQL via [node-postgres (pg)](https://node-postgres.com) |
 | Hébergement BDD | [Neon](https://neon.tech) (serverless PostgreSQL) |
-| Authentification | JWT ([jsonwebtoken](https://github.com/Keats/jsonwebtoken) 9) |
+| Authentification | JWT ([jsonwebtoken](https://github.com/auth0/node-jsonwebtoken)) |
 | Hachage mot de passe | Argon2 |
-| Email | [Lettre](https://github.com/lettre/lettre) |
-| Logs | Tracing + tracing-subscriber |
-| Middleware | Tower / Tower-HTTP (CORS, trace HTTP) |
-| Config | Dotenvy |
-| Gestion d'erreurs | Thiserror + Anyhow |
+| Email | [Nodemailer](https://nodemailer.com) |
+| CORS | cors |
+| Config | dotenv |
 
 ## Architecture BDD
 
@@ -41,22 +38,44 @@ demande_inscription
 ### Publiques
 | Méthode | Route | Description |
 |---------|-------|-------------|
+| POST | `/auth/inscription` | Soumettre une demande d'inscription |
 | POST | `/auth/login` | Authentification, retourne un JWT |
 | POST | `/auth/reset-password` | Réinitialisation via token temporaire |
 
 ### Protégées (JWT requis)
 | Méthode | Route | Description |
 |---------|-------|-------------|
+| GET | `/me` | Profil de l'utilisateur connecté |
 | POST | `/sessions/open` | Ouvrir une session |
 | POST | `/sessions/close` | Fermer une session |
 | GET | `/licences` | Lister les licences |
 | PATCH | `/licences/:id/assign` | Assigner une licence |
 | PATCH | `/licences/:id/unassign` | Désassigner une licence |
+| GET | `/school/organisation` | Infos de l'école |
+| GET | `/school/comptes` | Lister les comptes |
+| POST | `/school/comptes` | Créer un compte |
+| PATCH | `/school/comptes/:id` | Modifier un compte |
+| DELETE | `/school/comptes/:id` | Suspendre un compte |
+| GET | `/school/factures` | Factures |
+| GET | `/school/activite` | Journal d'activité |
+| GET | `/school/contact` | Contact de facturation |
+| PATCH | `/school/contact` | Mettre à jour le contact |
 
 ### Admin (JWT + rôle admin)
 | Méthode | Route | Description |
 |---------|-------|-------------|
 | GET | `/admin/dashboard` | Tableau de bord |
+| GET | `/admin/metriques` | Métriques globales |
+| GET | `/admin/alertes` | Alertes système |
+| GET | `/admin/analytiques` | Analytiques |
+| GET | `/admin/organisations` | Lister les organisations |
+| GET | `/admin/organisations/:id` | Détail d'une organisation |
+| GET | `/admin/plans` | Lister les plans (type_licence) |
+| GET | `/admin/demandes` | Demandes d'inscription |
+| PATCH | `/admin/demandes/:id` | Valider / rejeter une demande |
+| GET | `/admin/sessions` | Toutes les sessions |
+| DELETE | `/admin/sessions/:id` | Terminer une session |
+| GET | `/admin/journaux` | Journaux d'activité |
 | POST | `/admin/users` | Créer un utilisateur |
 | GET | `/admin/users` | Lister les utilisateurs |
 | DELETE | `/admin/users/:id/suspend` | Suspendre un utilisateur |
@@ -79,6 +98,7 @@ SMTP_HOST=...
 SMTP_PORT=587
 SMTP_USER=...
 SMTP_PASSWORD=...
+FRONTEND_URL=http://localhost:5173
 APP_ENV=development
 APP_PORT=3000
 ```
@@ -87,32 +107,30 @@ APP_PORT=3000
 
 ## Lancer le projet
 
-**Prérequis :** Rust installé ([rustup.rs](https://rustup.rs))
+**Prérequis :** Node.js 18+
 
 ```bash
-cargo run
+npm install
+npm run dev     # développement (nodemon, rechargement auto)
+npm start       # production
 ```
 
-Les migrations sont appliquées automatiquement au démarrage :
+Les migrations sont appliquées automatiquement au démarrage. Si le schéma existe déjà (base Neon déjà initialisée), il est détecté et les migrations ne sont pas rejouées.
 
 ```
-INFO Connexion PostgreSQL établie
-INFO Migrations appliquées
-INFO Serveur Cubi démarré sur le port 3000
+Migrations appliquées
+Admin prêt : admin@cubi.fr / admin123
+Serveur Cubi démarré sur le port 3000
 ```
 
 ## Migrations
 
-```bash
-# Ajouter une migration
-sqlx migrate add <nom>
+Les fichiers SQL sont dans `migrations/`. Ils sont exécutés automatiquement au démarrage via `src/migrate.js`.
 
-# Appliquer manuellement
-sqlx migrate run
+Pour ajouter une migration, créer un nouveau fichier numéroté dans `migrations/` :
+
 ```
-
-Installer sqlx-cli (optionnel) :
-
-```bash
-cargo install sqlx-cli --no-default-features --features rustls,postgres
+migrations/
+  001_init.sql
+  002_ma_migration.sql   ← nouveau fichier
 ```

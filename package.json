@@ -1,16 +1,22 @@
 {
-  "name": "vitrine_backend",
-  "version": "0.1.0",
-  "description": "Backend Rust/Axum pour CUBI",
+  "name": "vitrine-backend",
+  "version": "1.0.0",
+  "description": "Backend Express/Node.js pour CUBI",
+  "main": "src/index.js",
   "scripts": {
-    "dev": "cargo run",
-    "build": "cargo build --release",
-    "seed": "cargo run --bin seed",
-    "migrate": "sqlx migrate run",
-    "migrate:revert": "sqlx migrate revert",
-    "check": "cargo check",
-    "fmt": "cargo fmt",
-    "clippy": "cargo clippy"
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
   },
-  "private": true
+  "dependencies": {
+    "argon2": "^0.41.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^9.0.3",
+    "pg": "^8.11.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
 }
