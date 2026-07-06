@@ -243,7 +243,10 @@ router.post('/users', async (req, res, next) => {
 
     const EMAIL_WAIT_MS = 2000;
     const emailPromise = sendWelcomeEmail(email, prenom, tempPassword, tokenTemp, config.frontendUrl)
-      .then(() => true)
+      .then(() => {
+        console.log(`Email de bienvenue envoyé à ${email}`);
+        return true;
+      })
       .catch(e => {
         console.warn(`Échec envoi email pour ${email}: ${e.message}`);
         return false;
