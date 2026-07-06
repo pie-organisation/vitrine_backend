@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const argon2 = require('argon2');
+const bcrypt = require('bcryptjs');
 const pool = require('./db');
 const config = require('./config');
 const runMigrations = require('./migrate');
@@ -77,7 +77,7 @@ async function seedAdminIfMissing() {
   );
   const ecoleId = ecoleRows[0].id;
 
-  const hash = await argon2.hash('admin123');
+  const hash = await bcrypt.hash('admin123', 12);
   await pool.query(
     `INSERT INTO utilisateur (ecole_id, nom, prenom, email, mot_de_passe_hash, mdp_temporaire, role, statut)
      VALUES ($1, 'Admin', 'CUBI', 'admin@cubi.fr', $2, FALSE, 'admin', 'actif')
