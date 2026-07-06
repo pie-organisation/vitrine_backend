@@ -2,8 +2,8 @@ services:
   - type: web
     name: vitrine-backend
     runtime: node
-    buildCommand: npm install
-    startCommand: npm start
+    buildCommand: yarn install --frozen-lockfile
+    startCommand: yarn start
     envVars:
       - key: NODE_ENV
         value: production
