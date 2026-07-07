@@ -263,11 +263,66 @@ router.delete('/equipe/:id', requireCubi('super_admin'), async (req, res, next) 
 router.get('/messages', (req, res) => res.json([]));
 router.patch('/messages/:id', requireCubi('super_admin'), (req, res) => res.json({ message: 'Message mis à jour' }));
 
-// ── Offres (stubs) ────────────────────────────────────────────────────────────
+// ── Offres ────────────────────────────────────────────────────────────────────
 
-router.get('/offres', (req, res) => res.json([]));
-router.post('/offres', requireCubi('super_admin'), (req, res) => res.json({ message: 'Offre créée' }));
-router.patch('/offres/:id', requireCubi('super_admin'), (req, res) => res.json({ message: 'Offre mise à jour' }));
+router.get('/offres', async (req, res, next) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM offre ORDER BY date_creation ASC");
+    res.json(rows.map(o => ({
+      id: o.id,
+      nom: o.nom,
+      tagline: o.tagline,
+      prix: o.prix,
+      statut: o.statut,
+      features: o.features,
+      populaire: o.populaire,
+    })));
+  } catch (err) { next(err); }
+});
+
+router.post('/offres', requireCubi('super_admin'), async (req, res, next) => {
+  try {
+    const { rows } = await pool.query("INSERT INTO offre DEFAULT VALUES RETURNING *");
+    const o = rows[0];
+    res.json({
+      id: o.id,
+      nom: o.nom,
+      tagline: o.tagline,
+      prix: o.prix,
+      statut: o.statut,
+      features: o.features,
+      populaire: o.populaire,
+    });
+  } catch (err) { next(err); }
+});
+
+router.patch('/offres/:id', requireCubi('super_admin'), async (req, res, next) => {
+  try {
+    const { nom, tagline, prix, statut, features, populaire } = req.body;
+    const { rows } = await pool.query(
+      `UPDATE offre SET
+         nom       = COALESCE($1, nom),
+         tagline   = COALESCE($2, tagline),
+         prix      = COALESCE($3, prix),
+         statut    = COALESCE($4, statut),
+         features  = COALESCE($5, features),
+         populaire = COALESCE($6, populaire)
+       WHERE id = $7
+       RETURNING *`,
+      [nom ?? null, tagline ?? null, prix ?? null, statut ?? null, features ?? null, populaire ?? null, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Offre introuvable' });
+    res.json({ message: 'Offre mise à jour' });
+  } catch (err) { next(err); }
+});
+
+router.delete('/offres/:id', requireCubi('super_admin'), async (req, res, next) => {
+  try {
+    const { rowCount } = await pool.query("DELETE FROM offre WHERE id = $1", [req.params.id]);
+    if (rowCount === 0) return res.status(404).json({ error: 'Offre introuvable' });
+    res.json({ message: 'Offre supprimée' });
+  } catch (err) { next(err); }
+});
 
 // ── Utilitaires ───────────────────────────────────────────────────────────────
 
