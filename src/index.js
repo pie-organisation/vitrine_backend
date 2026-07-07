@@ -6,7 +6,7 @@ const pool = require('./db');
 const config = require('./config');
 const runMigrations = require('./migrate');
 const swaggerSpec = require('./swagger');
-const { requireAuth, requireAdmin } = require('./middleware/auth');
+const { requireAuth, requireCubi, requireEcoleAdmin } = require('./middleware/auth');
 
 const authRouter     = require('./routes/auth');
 const sessionsRouter = require('./routes/sessions');
@@ -29,23 +29,24 @@ app.use('/auth', authRouter);
 // ── Routes protégées (JWT requis) ─────────────────────────────────────────────
 app.get('/me', requireAuth, async (req, res, next) => {
   try {
+    const table = req.auth.type === 'cubi' ? 'utilisateur_cubi' : 'utilisateur';
     const { rows } = await pool.query(
-      "SELECT * FROM utilisateur WHERE id = $1",
+      `SELECT * FROM ${table} WHERE id = $1`,
       [req.auth.userId]
     );
     if (!rows.length) return res.status(404).json({ error: 'Utilisateur introuvable' });
     const user = { ...rows[0] };
     delete user.mot_de_passe_hash;
-    res.json(user);
+    res.json({ ...user, type: req.auth.type });
   } catch (err) { next(err); }
 });
 
 app.use('/sessions', requireAuth, sessionsRouter);
 app.use('/licences', requireAuth, licencesRouter);
-app.use('/school',   requireAuth, schoolRouter);
+app.use('/school',   requireAuth, requireEcoleAdmin, schoolRouter);
 
-// ── Routes admin (JWT + rôle admin) ──────────────────────────────────────────
-app.use('/admin', requireAuth, requireAdmin, adminRouter);
+// ── Routes admin Cubi (JWT + équipe plateforme) ──────────────────────────────
+app.use('/admin', requireAuth, requireCubi('super_admin', 'support', 'lecture'), adminRouter);
 
 // ── Gestion d'erreurs ─────────────────────────────────────────────────────────
 app.use((err, req, res, _next) => {

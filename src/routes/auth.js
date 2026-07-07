@@ -34,43 +34,37 @@ router.post('/login', async (req, res, next) => {
   try {
     const { email, mot_de_passe } = req.body;
 
-    // TEMP DEBUG — à retirer une fois le 401 élucidé
-    console.log('[DEBUG login] content-type=%s body-keys=%s email=%j mdp-len=%s',
-      req.headers['content-type'], Object.keys(req.body || {}), email, mot_de_passe ? mot_de_passe.length : 'undefined');
-    console.log('[DEBUG login] db-host=%s', (() => {
-      try { return new URL(config.databaseUrl).host; } catch { return 'PARSE_ERROR'; }
-    })());
-
-    const { rows } = await pool.query(
-      "SELECT * FROM utilisateur WHERE email = $1 AND statut = 'actif'",
+    let type = 'cubi';
+    let { rows } = await pool.query(
+      "SELECT * FROM utilisateur_cubi WHERE email = $1 AND statut = 'actif'",
       [email]
     );
-
-    console.log('[DEBUG login] rows-found=%d', rows.length);
+    if (!rows.length) {
+      type = 'ecole';
+      ({ rows } = await pool.query(
+        "SELECT * FROM utilisateur WHERE email = $1 AND statut = 'actif'",
+        [email]
+      ));
+    }
     if (!rows.length) return res.status(401).json({ error: 'Identifiants invalides' });
 
     const user = rows[0];
-    console.log('[DEBUG login] hash-len=%s hash-prefix=%s mdp_temporaire=%s statut=%s',
-      user.mot_de_passe_hash ? user.mot_de_passe_hash.length : 'null',
-      user.mot_de_passe_hash ? user.mot_de_passe_hash.slice(0, 10) : 'null',
-      user.mdp_temporaire, user.statut);
-
     const valid = await bcrypt.compare(mot_de_passe, user.mot_de_passe_hash);
-    console.log('[DEBUG login] bcrypt-compare-result=%s', valid);
     if (!valid) return res.status(401).json({ error: 'Identifiants invalides' });
 
     if (user.mdp_temporaire) {
       return res.status(403).json({ error: 'reset_required' });
     }
 
+    const table = type === 'cubi' ? 'utilisateur_cubi' : 'utilisateur';
     await pool.query(
-      "UPDATE utilisateur SET derniere_connexion = NOW() WHERE id = $1",
+      `UPDATE ${table} SET derniere_connexion = NOW() WHERE id = $1`,
       [user.id]
     );
 
-    const token = generateJwt(user);
+    const token = generateJwt(user, type);
     console.log(`Connexion réussie : ${user.id}`);
-    res.json({ token, user_id: user.id, role: user.role });
+    res.json({ token, user_id: user.id, role: user.role, type });
   } catch (err) { next(err); }
 });
 
@@ -87,8 +81,9 @@ router.post('/reset-password', async (req, res, next) => {
     }
 
     const hash = await bcrypt.hash(nouveau_mot_de_passe, 12);
+    const table = claims.type === 'cubi' ? 'utilisateur_cubi' : 'utilisateur';
     const { rowCount } = await pool.query(
-      `UPDATE utilisateur
+      `UPDATE ${table}
        SET mot_de_passe_hash = $1, mdp_temporaire = FALSE
        WHERE id = $2 AND mdp_temporaire = TRUE`,
       [hash, claims.sub]

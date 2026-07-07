@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const pool = require('../db');
 const config = require('../config');
-const { generateTempJwt } = require('../middleware/auth');
+const { generateTempJwt, requireCubi } = require('../middleware/auth');
 
 // ── Métriques ─────────────────────────────────────────────────────────────────
 
@@ -64,28 +64,6 @@ router.get('/analytiques', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ── Dashboard ─────────────────────────────────────────────────────────────────
-
-router.get('/dashboard', async (req, res, next) => {
-  try {
-    const ecoleId = req.auth.ecoleId;
-    const [users, sessions, licAvail, licAssigned, classes] = await Promise.all([
-      pool.query("SELECT COUNT(*) FROM utilisateur WHERE ecole_id = $1 AND statut = 'actif'", [ecoleId]),
-      pool.query("SELECT COUNT(*) FROM session s JOIN utilisateur u ON u.id = s.utilisateur_id WHERE u.ecole_id = $1 AND s.statut = 'active'", [ecoleId]),
-      pool.query("SELECT COUNT(*) FROM licence WHERE ecole_id = $1 AND statut = 'disponible'", [ecoleId]),
-      pool.query("SELECT COUNT(*) FROM licence WHERE ecole_id = $1 AND statut = 'assignee'", [ecoleId]),
-      pool.query("SELECT COUNT(*) FROM classe WHERE ecole_id = $1", [ecoleId]),
-    ]);
-    res.json({
-      nb_utilisateurs_actifs:  parseInt(users.rows[0].count),
-      nb_sessions_actives:     parseInt(sessions.rows[0].count),
-      nb_licences_disponibles: parseInt(licAvail.rows[0].count),
-      nb_licences_assignees:   parseInt(licAssigned.rows[0].count),
-      nb_classes:              parseInt(classes.rows[0].count),
-    });
-  } catch (err) { next(err); }
-});
-
 // ── Organisations ─────────────────────────────────────────────────────────────
 
 router.get('/organisations', async (req, res, next) => {
@@ -123,9 +101,9 @@ router.get('/plans', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.post('/plans', (req, res) => res.json({ message: 'Fonctionnalité à implémenter' }));
-router.patch('/plans/:id', (req, res) => res.json({ message: 'Fonctionnalité à implémenter' }));
-router.delete('/plans/:id', (req, res) => res.json({ message: 'Fonctionnalité à implémenter' }));
+router.post('/plans', requireCubi('super_admin'), (req, res) => res.json({ message: 'Fonctionnalité à implémenter' }));
+router.patch('/plans/:id', requireCubi('super_admin'), (req, res) => res.json({ message: 'Fonctionnalité à implémenter' }));
+router.delete('/plans/:id', requireCubi('super_admin'), (req, res) => res.json({ message: 'Fonctionnalité à implémenter' }));
 
 // ── Demandes d'inscription ────────────────────────────────────────────────────
 
@@ -138,7 +116,7 @@ router.get('/demandes', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.patch('/demandes/:id', async (req, res, next) => {
+router.patch('/demandes/:id', requireCubi('super_admin'), async (req, res, next) => {
   try {
     const { statut } = req.body;
     const { rowCount } = await pool.query(
@@ -161,7 +139,7 @@ router.get('/sessions', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.delete('/sessions/:id', async (req, res, next) => {
+router.delete('/sessions/:id', requireCubi('super_admin'), async (req, res, next) => {
   try {
     const { rowCount } = await pool.query(
       "UPDATE session SET statut = 'terminee', date_fin = NOW() WHERE id = $1",
@@ -195,36 +173,34 @@ router.get('/journaux', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ── Équipe (stubs) ────────────────────────────────────────────────────────────
+// ── Équipe (utilisateur_cubi) ─────────────────────────────────────────────────
 
-router.get('/equipe', (req, res) => res.json([]));
-router.post('/equipe', (req, res) => res.json({ message: 'Invitation envoyée' }));
-router.patch('/equipe/:id', (req, res) => res.json({ message: 'Rôle modifié' }));
-router.delete('/equipe/:id', (req, res) => res.json({ message: 'Accès révoqué' }));
-
-// ── Messages (stubs) ──────────────────────────────────────────────────────────
-
-router.get('/messages', (req, res) => res.json([]));
-router.patch('/messages/:id', (req, res) => res.json({ message: 'Message mis à jour' }));
-
-// ── Offres (stubs) ────────────────────────────────────────────────────────────
-
-router.get('/offres', (req, res) => res.json([]));
-router.post('/offres', (req, res) => res.json({ message: 'Offre créée' }));
-router.patch('/offres/:id', (req, res) => res.json({ message: 'Offre mise à jour' }));
-
-// ── Utilisateurs ──────────────────────────────────────────────────────────────
-
-router.post('/users', async (req, res, next) => {
+router.get('/equipe', async (req, res, next) => {
   try {
-    const { nom, prenom, email, role, classe_id } = req.body;
+    const { rows } = await pool.query(
+      "SELECT * FROM utilisateur_cubi ORDER BY date_invitation DESC"
+    );
+    res.json(rows.map(u => ({
+      id: u.id,
+      nom: u.nom,
+      prenom: u.prenom,
+      email: u.email,
+      role: u.role,
+      dateAjout: new Date(u.date_invitation).toLocaleDateString('fr-FR'),
+    })));
+  } catch (err) { next(err); }
+});
+
+router.post('/equipe', requireCubi('super_admin'), async (req, res, next) => {
+  try {
+    const { nom, prenom, email, role } = req.body;
 
     const { rows: existing } = await pool.query(
-      "SELECT EXISTS(SELECT 1 FROM utilisateur WHERE email = $1) AS exists",
+      "SELECT EXISTS(SELECT 1 FROM utilisateur_cubi WHERE email = $1) AS exists",
       [email]
     );
     if (existing[0].exists) {
-      return res.status(409).json({ error: 'Un utilisateur avec cet email existe déjà' });
+      return res.status(409).json({ error: 'Un membre avec cet email existe déjà' });
     }
 
     const tempPassword = generateTempPassword();
@@ -232,13 +208,13 @@ router.post('/users', async (req, res, next) => {
     const userId = randomUUID();
 
     await pool.query(
-      `INSERT INTO utilisateur
-         (id, ecole_id, classe_id, invite_par, nom, prenom, email, mot_de_passe_hash, mdp_temporaire, role, statut)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE, $9, 'actif')`,
-      [userId, req.auth.ecoleId, classe_id || null, req.auth.userId, nom, prenom, email, hash, role]
+      `INSERT INTO utilisateur_cubi
+         (id, invite_par, nom, prenom, email, mot_de_passe_hash, mdp_temporaire, role, statut)
+       VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7, 'actif')`,
+      [userId, req.auth.userId, nom, prenom, email, hash, role]
     );
 
-    const tokenTemp = generateTempJwt({ id: userId, ecole_id: req.auth.ecoleId, role });
+    const tokenTemp = generateTempJwt({ id: userId, role }, 'cubi');
     const resetLink = `${config.frontendUrl}/reset-password?token=${tokenTemp}`;
 
     const EMAIL_WAIT_MS = 2000;
@@ -254,7 +230,7 @@ router.post('/users', async (req, res, next) => {
     const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), EMAIL_WAIT_MS));
     const emailSent = await Promise.race([emailPromise, timeoutPromise]);
 
-    console.log(`Utilisateur créé : ${userId} par ${req.auth.userId}`);
+    console.log(`Membre équipe Cubi créé : ${userId} par ${req.auth.userId}`);
     res.json({
       utilisateur_id: userId,
       reset_link: resetLink,
@@ -263,26 +239,40 @@ router.post('/users', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.get('/users', async (req, res, next) => {
+router.patch('/equipe/:id', requireCubi('super_admin'), async (req, res, next) => {
   try {
-    const { rows } = await pool.query(
-      "SELECT * FROM utilisateur WHERE ecole_id = $1 ORDER BY date_invitation DESC",
-      [req.auth.ecoleId]
-    );
-    res.json(rows.map(u => { const r = { ...u }; delete r.mot_de_passe_hash; return r; }));
+    const { role, statut } = req.body;
+    if (role) {
+      await pool.query("UPDATE utilisateur_cubi SET role = $1 WHERE id = $2", [role, req.params.id]);
+    }
+    if (statut) {
+      await pool.query("UPDATE utilisateur_cubi SET statut = $1 WHERE id = $2", [statut, req.params.id]);
+    }
+    res.json({ message: 'Rôle modifié' });
   } catch (err) { next(err); }
 });
 
-router.delete('/users/:id/suspend', async (req, res, next) => {
+router.delete('/equipe/:id', requireCubi('super_admin'), async (req, res, next) => {
   try {
     const { rowCount } = await pool.query(
-      "UPDATE utilisateur SET statut = 'suspendu' WHERE id = $1 AND ecole_id = $2",
-      [req.params.id, req.auth.ecoleId]
+      "UPDATE utilisateur_cubi SET statut = 'inactif' WHERE id = $1",
+      [req.params.id]
     );
-    if (rowCount === 0) return res.status(404).json({ error: 'Utilisateur introuvable' });
-    res.json({ message: 'Utilisateur suspendu' });
+    if (rowCount === 0) return res.status(404).json({ error: 'Membre introuvable' });
+    res.json({ message: 'Accès révoqué' });
   } catch (err) { next(err); }
 });
+
+// ── Messages (stubs) ──────────────────────────────────────────────────────────
+
+router.get('/messages', (req, res) => res.json([]));
+router.patch('/messages/:id', requireCubi('super_admin'), (req, res) => res.json({ message: 'Message mis à jour' }));
+
+// ── Offres (stubs) ────────────────────────────────────────────────────────────
+
+router.get('/offres', (req, res) => res.json([]));
+router.post('/offres', requireCubi('super_admin'), (req, res) => res.json({ message: 'Offre créée' }));
+router.patch('/offres/:id', requireCubi('super_admin'), (req, res) => res.json({ message: 'Offre mise à jour' }));
 
 // ── Utilitaires ───────────────────────────────────────────────────────────────
 
