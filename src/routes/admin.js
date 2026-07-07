@@ -1,7 +1,6 @@
 const router = require('express').Router();
 const { randomUUID } = require('crypto');
 const bcrypt = require('bcryptjs');
-const nodemailer = require('nodemailer');
 const pool = require('../db');
 const config = require('../config');
 const { generateTempJwt, requireCubi } = require('../middleware/auth');
@@ -287,19 +286,24 @@ function generateTempPassword() {
 
 async function sendWelcomeEmail(email, prenom, motDePasse, tokenReset, frontendUrl) {
   const resetLink = `${frontendUrl}/reset-password?token=${tokenReset}`;
-  const transporter = nodemailer.createTransport({
-    host: config.smtpHost,
-    port: config.smtpPort,
-    secure: false,
-    auth: { user: config.smtpUser, pass: config.smtpPassword },
-    tls: { rejectUnauthorized: false },
+  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': config.brevoApiKey,
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: { name: 'Cubi', email: config.emailFrom },
+      to: [{ email, name: prenom }],
+      subject: 'Bienvenue sur Cubi - Vos identifiants',
+      textContent: `Bonjour ${prenom},\n\nVotre compte CUBI a été créé par un administrateur.\n\nEmail : ${email}\nMot de passe temporaire : ${motDePasse}\n\nVous devez définir votre mot de passe définitif en cliquant sur ce lien :\n${resetLink}\n\nCe lien est valable 48h.\n\nL'équipe CUBI`,
+    }),
   });
-  await transporter.sendMail({
-    from: `Cubi <${config.smtpFrom}>`,
-    to: email,
-    subject: 'Bienvenue sur Cubi - Vos identifiants',
-    text: `Bonjour ${prenom},\n\nVotre compte CUBI a été créé par un administrateur.\n\nEmail : ${email}\nMot de passe temporaire : ${motDePasse}\n\nVous devez définir votre mot de passe définitif en cliquant sur ce lien :\n${resetLink}\n\nCe lien est valable 48h.\n\nL'équipe CUBI`,
-  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Brevo API ${res.status}: ${body}`);
+  }
 }
 
 module.exports = router;
