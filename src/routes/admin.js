@@ -177,7 +177,7 @@ router.get('/journaux', async (req, res, next) => {
 router.get('/equipe', async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      "SELECT * FROM utilisateur_cubi ORDER BY date_invitation DESC"
+      "SELECT * FROM utilisateur_cubi WHERE statut = 'actif' ORDER BY date_invitation DESC"
     );
     res.json(rows.map(u => ({
       id: u.id,
@@ -202,39 +202,32 @@ router.post('/equipe', requireCubi('super_admin'), async (req, res, next) => {
       return res.status(409).json({ error: 'Un membre avec cet email existe déjà' });
     }
 
-    const tempPassword = generateTempPassword();
-    const hash = await bcrypt.hash(tempPassword, 12);
+    // Mot de passe provisoire non communiqué : le membre définit le sien via le
+    // lien de l'email (token de reset), il n'y a jamais besoin de le connaître.
+    const placeholderHash = await bcrypt.hash(generateTempPassword(), 12);
     const userId = randomUUID();
 
     await pool.query(
       `INSERT INTO utilisateur_cubi
          (id, invite_par, nom, prenom, email, mot_de_passe_hash, mdp_temporaire, role, statut)
        VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7, 'actif')`,
-      [userId, req.auth.userId, nom, prenom, email, hash, role]
+      [userId, req.auth.userId, nom, prenom, email, placeholderHash, role]
     );
 
     const tokenTemp = generateTempJwt({ id: userId, role }, 'cubi');
-    const resetLink = `${config.frontendUrl}/reset-password?token=${tokenTemp}`;
 
-    const EMAIL_WAIT_MS = 2000;
-    const emailPromise = sendWelcomeEmail(email, prenom, tempPassword, tokenTemp, config.frontendUrl)
-      .then(() => {
-        console.log(`Email de bienvenue envoyé à ${email}`);
-        return true;
-      })
-      .catch(e => {
-        console.warn(`Échec envoi email pour ${email}: ${e.message}`);
-        return false;
-      });
-    const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), EMAIL_WAIT_MS));
-    const emailSent = await Promise.race([emailPromise, timeoutPromise]);
+    try {
+      await sendWelcomeEmail(email, prenom, tokenTemp, config.frontendUrl);
+    } catch (e) {
+      // Email non envoyé : on annule la création, l'admin n'a aucun moyen de
+      // communiquer le mot de passe temporaire autrement.
+      await pool.query("DELETE FROM utilisateur_cubi WHERE id = $1", [userId]);
+      console.warn(`Échec envoi email pour ${email}, compte annulé : ${e.message}`);
+      return res.status(422).json({ message: "L'email d'invitation n'a pas pu être envoyé. Compte non créé, réessaie." });
+    }
 
     console.log(`Membre équipe Cubi créé : ${userId} par ${req.auth.userId}`);
-    res.json({
-      utilisateur_id: userId,
-      reset_link: resetLink,
-      ...(emailSent ? {} : { reset_token: tokenTemp }),
-    });
+    res.json({ utilisateur_id: userId, message: 'Invitation envoyée' });
   } catch (err) { next(err); }
 });
 
@@ -253,12 +246,15 @@ router.patch('/equipe/:id', requireCubi('super_admin'), async (req, res, next) =
 
 router.delete('/equipe/:id', requireCubi('super_admin'), async (req, res, next) => {
   try {
+    if (req.params.id === req.auth.userId) {
+      return res.status(400).json({ error: 'Impossible de supprimer son propre compte' });
+    }
     const { rowCount } = await pool.query(
-      "UPDATE utilisateur_cubi SET statut = 'inactif' WHERE id = $1",
+      "DELETE FROM utilisateur_cubi WHERE id = $1",
       [req.params.id]
     );
     if (rowCount === 0) return res.status(404).json({ error: 'Membre introuvable' });
-    res.json({ message: 'Accès révoqué' });
+    res.json({ message: 'Membre supprimé' });
   } catch (err) { next(err); }
 });
 
@@ -284,7 +280,7 @@ function generateTempPassword() {
   return pwd;
 }
 
-async function sendWelcomeEmail(email, prenom, motDePasse, tokenReset, frontendUrl) {
+async function sendWelcomeEmail(email, prenom, tokenReset, frontendUrl) {
   const resetLink = `${frontendUrl}/reset-password?token=${tokenReset}`;
   const res = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
@@ -297,7 +293,7 @@ async function sendWelcomeEmail(email, prenom, motDePasse, tokenReset, frontendU
       sender: { name: 'Cubi', email: config.emailFrom },
       to: [{ email, name: prenom }],
       subject: 'Bienvenue sur Cubi - Vos identifiants',
-      textContent: `Bonjour ${prenom},\n\nVotre compte CUBI a été créé par un administrateur.\n\nEmail : ${email}\nMot de passe temporaire : ${motDePasse}\n\nVous devez définir votre mot de passe définitif en cliquant sur ce lien :\n${resetLink}\n\nCe lien est valable 48h.\n\nL'équipe CUBI`,
+      textContent: `Bonjour ${prenom},\n\nVotre compte CUBI a été créé par un administrateur.\n\nDéfinissez votre mot de passe en cliquant sur ce lien :\n${resetLink}\n\nCe lien est valable 48h.\n\nL'équipe CUBI`,
     }),
   });
   if (!res.ok) {
