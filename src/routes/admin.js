@@ -282,7 +282,20 @@ router.get('/offres', async (req, res, next) => {
 
 router.post('/offres', requireCubi('super_admin'), async (req, res, next) => {
   try {
-    const { rows } = await pool.query("INSERT INTO offre DEFAULT VALUES RETURNING *");
+    const {
+      nom = 'Nouvelle offre',
+      tagline = '',
+      prix = 'Sur devis',
+      statut = 'brouillon',
+      features = [],
+      populaire = false,
+    } = req.body || {};
+
+    const { rows } = await pool.query(
+      `INSERT INTO offre (nom, tagline, prix, statut, features, populaire)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [nom, tagline, prix, statut, features, populaire]
+    );
     const o = rows[0];
     res.json({
       id: o.id,
