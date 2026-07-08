@@ -82,27 +82,95 @@ router.get('/organisations/:id', async (req, res, next) => {
 
 // ── Plans (type_licence) ──────────────────────────────────────────────────────
 
+function serializeLicence(r) {
+  return {
+    id: r.id,
+    nom: r.nom,
+    sessionsMin: r.sessions_min,
+    sessionsMax: r.sessions_max,
+    prixUnitaire: parseFloat(r.prix_unitaire),
+    personnalisable: r.personnalisable,
+    ressourcesCpu: r.ressources_cpu,
+    ressourcesRamGo: r.ressources_ram_go,
+    actif: r.actif,
+    tarif: `${r.prix_unitaire} €/session`,
+    statut: r.actif ? 'actif' : 'archive',
+    nbOrganisations: 0,
+  };
+}
+
 router.get('/plans', async (req, res, next) => {
   try {
-    const { rows } = await pool.query(
-      "SELECT id, nom, sessions_min, sessions_max, prix_unitaire, actif FROM type_licence ORDER BY sessions_min"
-    );
-    res.json(rows.map(r => ({
-      id: r.id,
-      nom: r.nom,
-      sessionsMin: r.sessions_min,
-      sessionsMax: r.sessions_max,
-      tarif: `${r.prix_unitaire} €/session`,
-      statut: r.actif ? 'actif' : 'archive',
-      description: `Plan ${r.nom}`,
-      nbOrganisations: 0,
-    })));
+    const { rows } = await pool.query("SELECT * FROM type_licence ORDER BY sessions_min");
+    res.json(rows.map(serializeLicence));
   } catch (err) { next(err); }
 });
 
-router.post('/plans', requireCubi('super_admin'), (req, res) => res.json({ message: 'Fonctionnalité à implémenter' }));
-router.patch('/plans/:id', requireCubi('super_admin'), (req, res) => res.json({ message: 'Fonctionnalité à implémenter' }));
-router.delete('/plans/:id', requireCubi('super_admin'), (req, res) => res.json({ message: 'Fonctionnalité à implémenter' }));
+router.post('/plans', requireCubi('super_admin'), async (req, res, next) => {
+  try {
+    const {
+      nom, sessionsMin, sessionsMax, prixUnitaire,
+      personnalisable = false, ressourcesCpu, ressourcesRamGo, actif = true,
+    } = req.body || {};
+
+    if (!nom || sessionsMin == null || prixUnitaire == null || ressourcesCpu == null || ressourcesRamGo == null) {
+      return res.status(422).json({ message: 'Nom, sessions min, prix unitaire et ressources sont obligatoires.' });
+    }
+
+    const { rows } = await pool.query(
+      `INSERT INTO type_licence
+         (nom, sessions_min, sessions_max, prix_unitaire, personnalisable, ressources_cpu, ressources_ram_go, actif)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [nom, sessionsMin, sessionsMax ?? null, prixUnitaire, personnalisable, ressourcesCpu, ressourcesRamGo, actif]
+    );
+    res.json(serializeLicence(rows[0]));
+  } catch (err) { next(err); }
+});
+
+router.patch('/plans/:id', requireCubi('super_admin'), async (req, res, next) => {
+  try {
+    const {
+      nom, sessionsMin, sessionsMax, prixUnitaire,
+      personnalisable, ressourcesCpu, ressourcesRamGo, actif,
+    } = req.body || {};
+
+    const { rows } = await pool.query(
+      `UPDATE type_licence SET
+         nom               = COALESCE($1, nom),
+         sessions_min      = COALESCE($2, sessions_min),
+         sessions_max      = $3,
+         prix_unitaire     = COALESCE($4, prix_unitaire),
+         personnalisable   = COALESCE($5, personnalisable),
+         ressources_cpu    = COALESCE($6, ressources_cpu),
+         ressources_ram_go = COALESCE($7, ressources_ram_go),
+         actif             = COALESCE($8, actif)
+       WHERE id = $9
+       RETURNING *`,
+      [
+        nom ?? null,
+        sessionsMin ?? null,
+        sessionsMax ?? null,
+        prixUnitaire ?? null,
+        personnalisable ?? null,
+        ressourcesCpu ?? null,
+        ressourcesRamGo ?? null,
+        actif ?? null,
+        req.params.id,
+      ]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Licence introuvable' });
+    res.json(serializeLicence(rows[0]));
+  } catch (err) { next(err); }
+});
+
+router.delete('/plans/:id', requireCubi('super_admin'), async (req, res, next) => {
+  try {
+    const { rowCount } = await pool.query("DELETE FROM type_licence WHERE id = $1", [req.params.id]);
+    if (rowCount === 0) return res.status(404).json({ error: 'Licence introuvable' });
+    res.json({ message: 'Licence supprimée' });
+  } catch (err) { next(err); }
+});
 
 // ── Demandes d'inscription ────────────────────────────────────────────────────
 
