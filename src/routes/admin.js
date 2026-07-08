@@ -174,24 +174,97 @@ router.delete('/plans/:id', requireCubi('super_admin'), async (req, res, next) =
 
 // ── Demandes d'inscription ────────────────────────────────────────────────────
 
+function serializeDemande(r) {
+  return {
+    id: r.id,
+    nomEntite: r.type_demande === 'ecole' ? (r.nom_ecole || r.nom_siege_ou_ecole) : r.nom_siege_ou_ecole,
+    type: r.type_demande,
+    dateSubmission: new Date(r.date_demande).toLocaleDateString('fr-FR'),
+    statut: r.statut,
+    siret: r.siret || '',
+    siretVerifie: false,
+    nomSiege: r.nom_siege_ou_ecole || '',
+    nomDaf: r.nom_daf || '',
+    prenomDaf: r.prenom_daf || '',
+    nomEcole: r.nom_ecole || '',
+    adresse: r.adresse || '',
+    codePostal: r.code_postal || '',
+    ville: r.ville || '',
+    planDemande: r.licence_nom || '',
+    nomContact: r.nom_contact || '',
+    prenomContact: r.prenom_contact || '',
+    emailContact: r.email || '',
+    visaEcole: r.visa_ecole || undefined,
+  };
+}
+
 router.get('/demandes', async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      "SELECT * FROM demande_inscription ORDER BY date_demande DESC"
+      `SELECT d.*, tl.nom AS licence_nom
+       FROM demande_inscription d
+       LEFT JOIN type_licence tl ON tl.id = d.type_licence_id
+       ORDER BY d.date_demande DESC`
     );
-    res.json(rows);
+    res.json(rows.map(serializeDemande));
   } catch (err) { next(err); }
 });
 
 router.patch('/demandes/:id', requireCubi('super_admin'), async (req, res, next) => {
   try {
     const { statut } = req.body;
-    const { rowCount } = await pool.query(
+    if (!['validee', 'refusee'].includes(statut)) {
+      return res.status(422).json({ message: 'Statut invalide' });
+    }
+
+    const { rows } = await pool.query("SELECT * FROM demande_inscription WHERE id = $1", [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Demande introuvable' });
+    const demande = rows[0];
+    if (demande.statut !== 'en_attente') {
+      return res.status(409).json({ error: 'Cette demande a déjà été traitée' });
+    }
+
+    await pool.query(
       "UPDATE demande_inscription SET statut = $1, date_traitement = NOW() WHERE id = $2",
       [statut, req.params.id]
     );
-    if (rowCount === 0) return res.status(404).json({ error: 'Demande introuvable' });
-    res.json({ message: 'Demande mise à jour' });
+
+    if (statut === 'validee') {
+      if (demande.type_demande === 'ecole') {
+        const { rows: ecoleRows } = await pool.query(
+          `INSERT INTO ecole
+             (nom_complet_ecole, siret, adresse, code_postal, ville, type_licence_id, mot_de_passe_hash, statut)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'actif')
+           RETURNING id`,
+          [
+            demande.nom_ecole || demande.nom_siege_ou_ecole, demande.siret, demande.adresse,
+            demande.code_postal, demande.ville, demande.type_licence_id, demande.mot_de_passe_hash,
+          ]
+        );
+        await pool.query(
+          `INSERT INTO utilisateur
+             (ecole_id, nom, prenom, email, mot_de_passe_hash, mdp_temporaire, role, statut)
+           VALUES ($1, $2, $3, $4, $5, FALSE, 'admin', 'actif')`,
+          [ecoleRows[0].id, demande.nom_contact, demande.prenom_contact, demande.email, demande.mot_de_passe_hash]
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO groupe_scolaire
+             (nom_du_siege, nom_DAF, prenom_DAF, type_licence_id, mot_de_passe_hash, statut)
+           VALUES ($1, $2, $3, $4, $5, 'actif')`,
+          [demande.nom_siege_ou_ecole, demande.nom_daf, demande.prenom_daf, demande.type_licence_id, demande.mot_de_passe_hash]
+        );
+      }
+
+      try {
+        await sendDemandeAcceptedEmail(demande.email, demande.prenom_contact || demande.prenom_daf, demande.type_demande);
+      } catch (e) {
+        console.warn(`Échec envoi email d'acceptation pour ${demande.email} : ${e.message}`);
+      }
+    }
+
+    console.log(`Demande ${req.params.id} ${statut} par ${req.auth.userId}`);
+    res.json({ message: statut === 'validee' ? 'Demande validée, compte créé' : 'Demande refusée' });
   } catch (err) { next(err); }
 });
 
@@ -414,6 +487,32 @@ function generateTempPassword() {
     pwd += charset[Math.floor(Math.random() * charset.length)];
   }
   return pwd;
+}
+
+async function sendDemandeAcceptedEmail(email, prenom, typeDemande) {
+  const loginUrl = `${config.frontendUrl}/login`;
+  const textContent = typeDemande === 'ecole'
+    ? `Bonjour ${prenom},\n\nBonne nouvelle : votre demande d'inscription a été validée par notre équipe.\n\nVous pouvez dès maintenant vous connecter avec l'email et le mot de passe que vous avez choisis lors de votre inscription :\n${loginUrl}\n\nL'équipe CUBI`
+    : `Bonjour ${prenom},\n\nBonne nouvelle : la demande d'inscription de votre groupe scolaire a été validée par notre équipe.\n\nNotre équipe revient vers vous prochainement pour la suite.\n\nL'équipe CUBI`;
+
+  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': config.brevoApiKey,
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: { name: 'Cubi', email: config.emailFrom },
+      to: [{ email, name: prenom }],
+      subject: 'Votre demande d\'inscription CUBI a été acceptée',
+      textContent,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Brevo API ${res.status}: ${body}`);
+  }
 }
 
 async function sendWelcomeEmail(email, prenom, tokenReset, frontendUrl) {

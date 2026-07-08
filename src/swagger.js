@@ -494,7 +494,7 @@ const swaggerSpec = {
               schema: {
                 type: 'object',
                 required: ['statut'],
-                properties: { statut: { type: 'string', enum: ['validee', 'rejetee'] } },
+                properties: { statut: { type: 'string', enum: ['validee', 'refusee'] } },
               },
             },
           },
