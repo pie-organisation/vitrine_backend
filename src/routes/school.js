@@ -2,6 +2,8 @@ const router = require('express').Router();
 const { randomUUID } = require('crypto');
 const bcrypt = require('bcryptjs');
 const pool = require('../db');
+const config = require('../config');
+const { generateTempJwt } = require('../middleware/auth');
 
 const VALID_ROLES = ['admin', 'scolarite', 'eleve', 'enseignant'];
 
@@ -96,7 +98,7 @@ router.post('/comptes', async (req, res, next) => {
            VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, TRUE, $8, 'actif')`,
           [userId, req.auth.ecoleId, req.auth.userId, c.nom, c.prenom, c.email, hash, c.type]
         );
-        created.push({ id: userId, email: c.email });
+        created.push({ id: userId, email: c.email, prenom: c.prenom, password, role: c.type });
       }
       await client.query('COMMIT');
     } catch (e) {
@@ -106,7 +108,19 @@ router.post('/comptes', async (req, res, next) => {
       client.release();
     }
 
-    res.json({ message: `${created.length} compte${created.length > 1 ? 's' : ''} créé${created.length > 1 ? 's' : ''}`, comptes: created });
+    for (const c of created) {
+      try {
+        const resetToken = generateTempJwt({ id: c.id, role: c.role }, 'ecole');
+        await sendAccountCreatedEmail(c.email, c.prenom, c.password, resetToken);
+      } catch (e) {
+        console.warn(`Échec envoi email de bienvenue pour ${c.email} : ${e.message}`);
+      }
+    }
+
+    res.json({
+      message: `${created.length} compte${created.length > 1 ? 's' : ''} créé${created.length > 1 ? 's' : ''}`,
+      comptes: created.map(({ id, email }) => ({ id, email })),
+    });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
@@ -279,5 +293,35 @@ router.patch('/contact', async (req, res, next) => {
     res.json({ message: 'Contact mis à jour' });
   } catch (err) { next(err); }
 });
+
+// ── Utilitaires ───────────────────────────────────────────────────────────────
+
+async function sendAccountCreatedEmail(email, prenom, motDePasse, resetToken) {
+  const resetLink = `${config.frontendUrl}/reset-password?token=${resetToken}`;
+  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': config.brevoApiKey,
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: { name: 'Cubi', email: config.emailFrom },
+      to: [{ email, name: prenom }],
+      subject: 'Ton compte CUBI est prêt',
+      textContent:
+        `Bonjour ${prenom},\n\n` +
+        `Un compte CUBI vient d'être créé pour toi. Il te permet de te connecter à distance à ton poste de travail.\n\n` +
+        `Identifiant : ${email}\n` +
+        `Mot de passe temporaire : ${motDePasse}\n\n` +
+        `Tu peux changer ce mot de passe à tout moment via ce lien :\n${resetLink}\n\n` +
+        `L'équipe CUBI`,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Brevo API ${res.status}: ${body}`);
+  }
+}
 
 module.exports = router;
