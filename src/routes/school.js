@@ -1,6 +1,33 @@
 const router = require('express').Router();
 const { randomUUID } = require('crypto');
+const bcrypt = require('bcryptjs');
 const pool = require('../db');
+
+const VALID_ROLES = ['admin', 'scolarite', 'eleve', 'enseignant'];
+
+function serializeAccount(r) {
+  return {
+    id: r.id,
+    type: r.role,
+    nom: r.nom,
+    prenom: r.prenom,
+    email: r.email,
+    licenceCubi: r.licence_id || '',
+    statut: r.statut === 'actif' ? 'actif' : 'inactif',
+    derniereConnexion: r.derniere_connexion
+      ? new Date(r.derniere_connexion).toLocaleString('fr-FR')
+      : 'Jamais connecté',
+  };
+}
+
+function generateTempPassword() {
+  const charset = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let pwd = '';
+  for (let i = 0; i < 12; i++) {
+    pwd += charset[Math.floor(Math.random() * charset.length)];
+  }
+  return pwd;
+}
 
 // GET /school/organisation
 router.get('/organisation', async (req, res, next) => {
@@ -18,26 +45,72 @@ router.get('/organisation', async (req, res, next) => {
 router.get('/comptes', async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      "SELECT * FROM utilisateur WHERE ecole_id = $1 ORDER BY date_invitation DESC",
+      `SELECT u.*, l.id AS licence_id
+       FROM utilisateur u
+       LEFT JOIN licence l ON l.utilisateur_id = u.id AND l.statut = 'assignee'
+       WHERE u.ecole_id = $1
+       ORDER BY u.date_invitation DESC`,
       [req.auth.ecoleId]
     );
-    res.json(rows.map(sanitizeUser));
+    res.json(rows.map(serializeAccount));
   } catch (err) { next(err); }
 });
 
-// POST /school/comptes
+// POST /school/comptes — création en lot (un ou plusieurs comptes)
 router.post('/comptes', async (req, res, next) => {
   try {
-    const { nom, prenom, email, role, classe_id } = req.body;
-    const userId = randomUUID();
-    await pool.query(
-      `INSERT INTO utilisateur
-         (id, ecole_id, classe_id, invite_par, nom, prenom, email, mot_de_passe_hash, mdp_temporaire, role, statut)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'temporaire', TRUE, $8, 'actif')`,
-      [userId, req.auth.ecoleId, classe_id || null, req.auth.userId, nom, prenom, email, role]
-    );
-    res.json({ id: userId, message: 'Compte créé' });
-  } catch (err) { next(err); }
+    const { comptes } = req.body || {};
+    if (!Array.isArray(comptes) || comptes.length === 0) {
+      return res.status(422).json({ message: "Aucun compte à créer — l'import de fichier n'est pas encore disponible, utilise la création manuelle." });
+    }
+
+    for (const c of comptes) {
+      if (!c.nom?.trim() || !c.prenom?.trim() || !c.email?.trim()) {
+        return res.status(422).json({ message: 'Chaque compte doit avoir un nom, un prénom et un email.' });
+      }
+      if (!VALID_ROLES.includes(c.type)) {
+        return res.status(422).json({ message: `Type de compte invalide : ${c.type}` });
+      }
+    }
+
+    const client = await pool.connect();
+    const created = [];
+    try {
+      await client.query('BEGIN');
+      for (const c of comptes) {
+        const { rows: existing } = await client.query(
+          "SELECT 1 FROM utilisateur WHERE email = $1",
+          [c.email]
+        );
+        if (existing.length) {
+          throw Object.assign(new Error(`Un compte avec l'email ${c.email} existe déjà`), { status: 409 });
+        }
+
+        const password = c.password?.trim() || generateTempPassword();
+        const hash = await bcrypt.hash(password, 12);
+        const userId = randomUUID();
+
+        await client.query(
+          `INSERT INTO utilisateur
+             (id, ecole_id, classe_id, invite_par, nom, prenom, email, mot_de_passe_hash, mdp_temporaire, role, statut)
+           VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, TRUE, $8, 'actif')`,
+          [userId, req.auth.ecoleId, req.auth.userId, c.nom, c.prenom, c.email, hash, c.type]
+        );
+        created.push({ id: userId, email: c.email });
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    res.json({ message: `${created.length} compte${created.length > 1 ? 's' : ''} créé${created.length > 1 ? 's' : ''}`, comptes: created });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
 });
 
 // PATCH /school/comptes/:id
@@ -206,11 +279,5 @@ router.patch('/contact', async (req, res, next) => {
     res.json({ message: 'Contact mis à jour' });
   } catch (err) { next(err); }
 });
-
-function sanitizeUser(u) {
-  const r = { ...u };
-  delete r.mot_de_passe_hash;
-  return r;
-}
 
 module.exports = router;
