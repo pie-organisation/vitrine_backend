@@ -28,6 +28,63 @@ router.get('/metriques', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── Notifications ─────────────────────────────────────────────────────────────
+
+function relativeTime(date) {
+  const diffMs = Date.now() - new Date(date).getTime();
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1)   return "à l'instant";
+  if (minutes < 60)  return `il y a ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24)    return `il y a ${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days === 1)    return 'hier';
+  return `il y a ${days}j`;
+}
+
+router.get('/notifications', async (req, res, next) => {
+  try {
+    const [demandes, sessions] = await Promise.all([
+      pool.query(
+        `SELECT id, nom_ecole, nom_siege_ou_ecole, date_demande
+         FROM demande_inscription
+         WHERE statut = 'en_attente'
+         ORDER BY date_demande DESC LIMIT 10`
+      ),
+      pool.query(
+        `SELECT s.id, s.date_debut, u.nom, u.prenom
+         FROM session s
+         JOIN utilisateur u ON u.id = s.utilisateur_id
+         WHERE s.statut = 'active' AND s.date_debut < NOW() - INTERVAL '8 hours'
+         ORDER BY s.date_debut ASC LIMIT 10`
+      ),
+    ]);
+
+    const notifs = [
+      ...demandes.rows.map(d => ({
+        id: `demande-${d.id}`,
+        type: 'demande',
+        message: `Nouvelle demande — ${d.nom_ecole || d.nom_siege_ou_ecole}`,
+        date: d.date_demande,
+      })),
+      ...sessions.rows.map(s => ({
+        id: `session-${s.id}`,
+        type: 'anomalie',
+        message: `Session anormale — ${s.prenom} ${s.nom} (active depuis plus de 8h)`,
+        date: s.date_debut,
+      })),
+    ].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    res.json(notifs.map(n => ({
+      id: n.id,
+      type: n.type,
+      message: n.message,
+      horodatage: relativeTime(n.date),
+      lu: false,
+    })));
+  } catch (err) { next(err); }
+});
+
 // ── Alertes ───────────────────────────────────────────────────────────────────
 
 router.get('/alertes', async (req, res, next) => {
