@@ -268,27 +268,44 @@ router.get('/demandes', async (req, res, next) => {
 });
 
 router.patch('/demandes/:id', requireCubi('super_admin'), async (req, res, next) => {
-  try {
-    const { statut } = req.body;
-    if (!['validee', 'refusee'].includes(statut)) {
-      return res.status(422).json({ message: 'Statut invalide' });
-    }
+  const { statut } = req.body;
+  if (!['validee', 'refusee'].includes(statut)) {
+    return res.status(422).json({ message: 'Statut invalide' });
+  }
 
-    const { rows } = await pool.query("SELECT * FROM demande_inscription WHERE id = $1", [req.params.id]);
-    if (!rows.length) return res.status(404).json({ error: 'Demande introuvable' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows } = await client.query(
+      "SELECT * FROM demande_inscription WHERE id = $1 FOR UPDATE",
+      [req.params.id]
+    );
+    if (!rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Demande introuvable' });
+    }
     const demande = rows[0];
     if (demande.statut !== 'en_attente') {
+      await client.query('ROLLBACK');
       return res.status(409).json({ error: 'Cette demande a déjà été traitée' });
     }
 
-    await pool.query(
+    if (statut === 'validee' && !demande.mot_de_passe_hash) {
+      await client.query('ROLLBACK');
+      return res.status(422).json({
+        message: "Cette demande a été soumise avant la mise à jour du formulaire et n'a pas de mot de passe enregistré. Demande au requérant de soumettre une nouvelle demande d'inscription.",
+      });
+    }
+
+    await client.query(
       "UPDATE demande_inscription SET statut = $1, date_traitement = NOW() WHERE id = $2",
       [statut, req.params.id]
     );
 
     if (statut === 'validee') {
       if (demande.type_demande === 'ecole') {
-        const { rows: ecoleRows } = await pool.query(
+        const { rows: ecoleRows } = await client.query(
           `INSERT INTO ecole
              (nom_complet_ecole, siret, adresse, code_postal, ville, type_licence_id, mot_de_passe_hash, statut)
            VALUES ($1, $2, $3, $4, $5, $6, $7, 'actif')
@@ -298,21 +315,25 @@ router.patch('/demandes/:id', requireCubi('super_admin'), async (req, res, next)
             demande.code_postal, demande.ville, demande.type_licence_id, demande.mot_de_passe_hash,
           ]
         );
-        await pool.query(
+        await client.query(
           `INSERT INTO utilisateur
              (ecole_id, nom, prenom, email, mot_de_passe_hash, mdp_temporaire, role, statut)
            VALUES ($1, $2, $3, $4, $5, FALSE, 'admin', 'actif')`,
           [ecoleRows[0].id, demande.nom_contact, demande.prenom_contact, demande.email, demande.mot_de_passe_hash]
         );
       } else {
-        await pool.query(
+        await client.query(
           `INSERT INTO groupe_scolaire
              (nom_du_siege, nom_DAF, prenom_DAF, type_licence_id, mot_de_passe_hash, statut)
            VALUES ($1, $2, $3, $4, $5, 'actif')`,
           [demande.nom_siege_ou_ecole, demande.nom_daf, demande.prenom_daf, demande.type_licence_id, demande.mot_de_passe_hash]
         );
       }
+    }
 
+    await client.query('COMMIT');
+
+    if (statut === 'validee') {
       try {
         await sendDemandeAcceptedEmail(demande.email, demande.prenom_contact || demande.prenom_daf, demande.type_demande);
       } catch (e) {
@@ -322,7 +343,12 @@ router.patch('/demandes/:id', requireCubi('super_admin'), async (req, res, next)
 
     console.log(`Demande ${req.params.id} ${statut} par ${req.auth.userId}`);
     res.json({ message: statut === 'validee' ? 'Demande validée, compte créé' : 'Demande refusée' });
-  } catch (err) { next(err); }
+  } catch (err) {
+    await client.query('ROLLBACK');
+    next(err);
+  } finally {
+    client.release();
+  }
 });
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
