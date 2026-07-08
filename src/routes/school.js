@@ -75,6 +75,75 @@ router.delete('/comptes/:id', async (req, res, next) => {
 // GET /school/factures
 router.get('/factures', (req, res) => res.json([]));
 
+// GET /school/sessions
+router.get('/sessions', async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT s.id, s.statut, s.type_session, s.ip_origine, s.appareil_os,
+              s.date_debut, s.date_fin, u.nom, u.prenom, u.role
+       FROM session s
+       JOIN utilisateur u ON u.id = s.utilisateur_id
+       WHERE u.ecole_id = $1
+       ORDER BY s.date_debut DESC
+       LIMIT 100`,
+      [req.auth.ecoleId]
+    );
+    res.json(rows.map(r => {
+      const debut = new Date(r.date_debut);
+      const fin   = r.date_fin ? new Date(r.date_fin) : new Date();
+      const dureeMin = Math.max(0, Math.round((fin - debut) / 60000));
+      const anomalie = r.statut === 'active' && (Date.now() - debut.getTime()) > 8 * 3600 * 1000;
+      return {
+        id: r.id,
+        nomUtilisateur: `${r.prenom} ${r.nom}`,
+        role: r.role,
+        heureDebut: debut.toLocaleString('fr-FR'),
+        duree: dureeMin >= 60 ? `${Math.floor(dureeMin / 60)}h${String(dureeMin % 60).padStart(2, '0')}` : `${dureeMin}min`,
+        statut: r.statut,
+        anomalie,
+        ip: r.ip_origine || '—',
+        appareilOs: r.appareil_os || '—',
+        typeSession: r.type_session,
+      };
+    }));
+  } catch (err) { next(err); }
+});
+
+// DELETE /school/sessions/:id — termine une session en cours
+router.delete('/sessions/:id', async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT s.id, s.licence_id FROM session s
+       JOIN utilisateur u ON u.id = s.utilisateur_id
+       WHERE s.id = $1 AND u.ecole_id = $2 AND s.statut = 'active'`,
+      [req.params.id, req.auth.ecoleId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Session active introuvable' });
+    const session = rows[0];
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        "UPDATE session SET statut = 'terminee', date_fin = NOW() WHERE id = $1",
+        [session.id]
+      );
+      await client.query(
+        "UPDATE licence SET nb_sessions_actives = GREATEST(0, nb_sessions_actives - 1) WHERE id = $1",
+        [session.licence_id]
+      );
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    res.json({ message: 'Session terminée' });
+  } catch (err) { next(err); }
+});
+
 // GET /school/activite
 router.get('/activite', async (req, res, next) => {
   try {
