@@ -5,23 +5,45 @@ const pool = require('../db');
 const config = require('../config');
 const { generateJwt } = require('../middleware/auth');
 
+// GET /auth/licences — catalogue public des licences actives (pour le formulaire d'inscription)
+router.get('/licences', async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT id, nom FROM type_licence WHERE actif = TRUE ORDER BY sessions_min"
+    );
+    res.json(rows);
+  } catch (err) { next(err); }
+});
+
 // POST /auth/inscription
 router.post('/inscription', async (req, res, next) => {
   try {
-    const { type, nom, email, siret, nom_daf, prenom_daf } = req.body;
+    const { type, nom, email, siret, nom_daf, prenom_daf, visa_ecole, type_licence_id } = req.body;
 
-    const { rows } = await pool.query(
-      "SELECT id FROM type_licence WHERE actif = TRUE ORDER BY sessions_min LIMIT 1"
-    );
-    if (!rows.length) {
-      return res.status(500).json({ error: 'Aucun type_licence disponible' });
+    let licenceId = type_licence_id;
+    if (licenceId) {
+      const { rows } = await pool.query(
+        "SELECT id FROM type_licence WHERE id = $1 AND actif = TRUE",
+        [licenceId]
+      );
+      if (!rows.length) {
+        return res.status(422).json({ message: 'Licence sélectionnée invalide' });
+      }
+    } else {
+      const { rows } = await pool.query(
+        "SELECT id FROM type_licence WHERE actif = TRUE ORDER BY sessions_min LIMIT 1"
+      );
+      if (!rows.length) {
+        return res.status(500).json({ error: 'Aucun type_licence disponible' });
+      }
+      licenceId = rows[0].id;
     }
 
     await pool.query(
       `INSERT INTO demande_inscription
-         (type_demande, nom_siege_ou_ecole, nom_daf, prenom_daf, siret, type_licence_id, statut)
-       VALUES ($1, $2, $3, $4, $5, $6, 'en_attente')`,
-      [type, nom, nom_daf || null, prenom_daf || null, siret || null, rows[0].id]
+         (type_demande, nom_siege_ou_ecole, nom_daf, prenom_daf, siret, visa_ecole, type_licence_id, statut)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'en_attente')`,
+      [type, nom, nom_daf || null, prenom_daf || null, siret || null, visa_ecole || null, licenceId]
     );
 
     console.log(`Demande d'inscription soumise : ${email}`);
