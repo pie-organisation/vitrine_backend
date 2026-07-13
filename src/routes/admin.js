@@ -121,19 +121,104 @@ router.get('/analytiques', async (req, res, next) => {
 });
 
 // ── Organisations ─────────────────────────────────────────────────────────────
+// Une "organisation" est soit une école indépendante, soit un groupe scolaire
+// (qui regroupe plusieurs écoles). On calcule les vraies données à partir des
+// tables ecole / groupe_scolaire / utilisateur / licence plutôt que de dumper
+// les lignes brutes, qui n'ont pas la forme attendue par le frontend.
+const ORGS_CTE = `
+  WITH orgs AS (
+    SELECT
+      e.id,
+      e.nom_complet_ecole AS nom,
+      'ecole'::text        AS type,
+      e.ville::text        AS ville,
+      e.siret::text        AS siret,
+      e.statut,
+      e.date_creation,
+      tl.nom               AS plan,
+      tl.prix_unitaire,
+      COUNT(DISTINCT u.id) FILTER (WHERE u.statut = 'actif') AS nb_utilisateurs,
+      COUNT(DISTINCT l.id)                                    AS nb_licences,
+      COUNT(DISTINCT l.id) FILTER (WHERE l.statut = 'assignee') AS licences_utilisees,
+      MIN(l.date_debut)   AS date_debut,
+      CASE WHEN BOOL_OR(l.date_fin IS NULL) THEN NULL ELSE MAX(l.date_fin) END AS date_expiration
+    FROM ecole e
+    JOIN type_licence tl  ON tl.id = e.type_licence_id
+    LEFT JOIN utilisateur u ON u.ecole_id = e.id
+    LEFT JOIN licence l     ON l.ecole_id = e.id
+    GROUP BY e.id, tl.nom, tl.prix_unitaire
+
+    UNION ALL
+
+    SELECT
+      g.id,
+      g.nom_du_siege       AS nom,
+      'groupe'::text        AS type,
+      NULL::text            AS ville,
+      NULL::text            AS siret,
+      g.statut,
+      g.date_creation,
+      tl.nom               AS plan,
+      tl.prix_unitaire,
+      COUNT(DISTINCT u.id) FILTER (WHERE u.statut = 'actif') AS nb_utilisateurs,
+      COUNT(DISTINCT l.id)                                    AS nb_licences,
+      COUNT(DISTINCT l.id) FILTER (WHERE l.statut = 'assignee') AS licences_utilisees,
+      MIN(l.date_debut)   AS date_debut,
+      CASE WHEN BOOL_OR(l.date_fin IS NULL) THEN NULL ELSE MAX(l.date_fin) END AS date_expiration
+    FROM groupe_scolaire g
+    JOIN type_licence tl   ON tl.id = g.type_licence_id
+    LEFT JOIN ecole e2       ON e2.groupe_scolaire_id = g.id
+    LEFT JOIN utilisateur u  ON u.ecole_id = e2.id
+    LEFT JOIN licence l      ON l.ecole_id = e2.id
+    GROUP BY g.id, tl.nom, tl.prix_unitaire
+  )
+`;
+
+function serializeOrgSummary(r) {
+  const nbLicences = Number(r.nb_licences) || 0;
+  const prixUnitaire = r.prix_unitaire !== null ? Number(r.prix_unitaire) : null;
+  return {
+    id: r.id,
+    nom: r.nom,
+    type: r.type,
+    ville: r.ville || '—',
+    siret: r.siret || '—',
+    statut: r.statut === 'actif' ? 'actif' : 'suspendu',
+    plan: r.plan,
+    nbUtilisateurs: Number(r.nb_utilisateurs) || 0,
+    dateDebut: r.date_debut
+      ? new Date(r.date_debut).toLocaleDateString('fr-FR')
+      : new Date(r.date_creation).toLocaleDateString('fr-FR'),
+    dateExpiration: r.date_expiration ? new Date(r.date_expiration).toLocaleDateString('fr-FR') : null,
+    montant: prixUnitaire !== null ? `${(prixUnitaire * nbLicences).toFixed(2).replace('.', ',')} €/mois` : '—',
+  };
+}
 
 router.get('/organisations', async (req, res, next) => {
   try {
-    const { rows } = await pool.query("SELECT * FROM ecole ORDER BY date_creation DESC");
-    res.json(rows);
+    const { rows } = await pool.query(`${ORGS_CTE} SELECT * FROM orgs ORDER BY date_creation DESC`);
+    res.json(rows.map(serializeOrgSummary));
   } catch (err) { next(err); }
 });
 
 router.get('/organisations/:id', async (req, res, next) => {
   try {
-    const { rows } = await pool.query("SELECT * FROM ecole WHERE id = $1", [req.params.id]);
+    const { rows } = await pool.query(`${ORGS_CTE} SELECT * FROM orgs WHERE id = $1`, [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Organisation introuvable' });
-    res.json(rows[0]);
+    const org = rows[0];
+
+    // La liste des admins n'a de sens que pour une école (les groupes n'ont
+    // pas de compte utilisateur propre dans le modèle actuel).
+    let admins = [];
+    if (org.type === 'ecole') {
+      const { rows: adminRows } = await pool.query(
+        "SELECT id, nom, prenom, email FROM utilisateur WHERE ecole_id = $1 AND role = 'admin'",
+        [org.id]
+      );
+      admins = adminRows.map(a => ({ id: a.id, nom: a.nom, prenom: a.prenom, email: a.email, role: 'Administrateur' }));
+    }
+
+    res.json({ ...serializeOrgSummary(org), admins });
   } catch (err) { next(err); }
 });
 
