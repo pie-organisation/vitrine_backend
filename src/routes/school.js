@@ -283,21 +283,35 @@ router.get('/activite', async (req, res, next) => {
 });
 
 // GET /school/contact
+// Le référent par défaut est l'admin connecté (celui qui a créé/gère le
+// compte) ; la boîte de facturation et le téléphone viennent de
+// contact_facturation quand ils ont déjà été renseignés.
 router.get('/contact', async (req, res, next) => {
   try {
-    const { rows } = await pool.query(
+    const { rows: userRows } = await pool.query(
+      "SELECT nom, prenom, email FROM utilisateur WHERE id = $1",
+      [req.auth.userId]
+    );
+    const { rows: contactRows } = await pool.query(
       "SELECT * FROM contact_facturation WHERE ecole_id = $1 LIMIT 1",
       [req.auth.ecoleId]
     );
-    if (rows.length) return res.json(rows[0]);
-    res.json({ nom_contact: '', prenom_contact: '', email_facturation: '', telephone: '' });
+    const user = userRows[0] || null;
+    const contact = contactRows[0] || null;
+    res.json({
+      nom:              contact?.nom_contact    || user?.nom    || '',
+      prenom:           contact?.prenom_contact || user?.prenom || '',
+      email:            user?.email || '',
+      boiteFacturation: contact?.email_facturation || '',
+      telephone:        contact?.telephone || '',
+    });
   } catch (err) { next(err); }
 });
 
 // PATCH /school/contact
 router.patch('/contact', async (req, res, next) => {
   try {
-    const { nom_contact, prenom_contact, email_facturation, telephone } = req.body;
+    const { nom, prenom, boiteFacturation, telephone } = req.body;
     const { rows } = await pool.query(
       "SELECT EXISTS(SELECT 1 FROM contact_facturation WHERE ecole_id = $1) AS exists",
       [req.auth.ecoleId]
@@ -311,13 +325,24 @@ router.patch('/contact', async (req, res, next) => {
            email_facturation = COALESCE($3, email_facturation),
            telephone         = COALESCE($4, telephone)
          WHERE ecole_id = $5`,
-        [nom_contact || null, prenom_contact || null, email_facturation || null, telephone || null, req.auth.ecoleId]
+        [nom || null, prenom || null, boiteFacturation || null, telephone || null, req.auth.ecoleId]
       );
     } else {
+      const { rows: userRows } = await pool.query(
+        "SELECT nom, prenom, email FROM utilisateur WHERE id = $1",
+        [req.auth.userId]
+      );
+      const user = userRows[0] || {};
       await pool.query(
         `INSERT INTO contact_facturation (ecole_id, nom_contact, prenom_contact, email_facturation, telephone)
          VALUES ($1, $2, $3, $4, $5)`,
-        [req.auth.ecoleId, nom_contact || '', prenom_contact || '', email_facturation || '', telephone || null]
+        [
+          req.auth.ecoleId,
+          nom || user.nom || '',
+          prenom || user.prenom || '',
+          boiteFacturation || user.email,
+          telephone || null,
+        ]
       );
     }
     res.json({ message: 'Contact mis à jour' });
