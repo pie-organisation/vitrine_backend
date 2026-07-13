@@ -22,6 +22,23 @@ function serializeAccount(r) {
   };
 }
 
+function serializeOrg(r) {
+  const nbLicences = Number(r.nb_licences) || 0;
+  const licencesUtilisees = Number(r.licences_utilisees) || 0;
+  const prixUnitaire = r.prix_unitaire !== null ? Number(r.prix_unitaire) : null;
+  return {
+    nom: r.nom,
+    plan: r.plan,
+    dateDebut: r.date_debut
+      ? new Date(r.date_debut).toLocaleDateString('fr-FR')
+      : new Date(r.date_creation).toLocaleDateString('fr-FR'),
+    dateExpiration: r.date_expiration ? new Date(r.date_expiration).toLocaleDateString('fr-FR') : null,
+    montant: prixUnitaire !== null ? `${(prixUnitaire * nbLicences).toFixed(2).replace('.', ',')} €/mois` : '—',
+    nbLicences,
+    licencesUtilisees,
+  };
+}
+
 function generateTempPassword() {
   const charset = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
   let pwd = '';
@@ -35,11 +52,24 @@ function generateTempPassword() {
 router.get('/organisation', async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      "SELECT * FROM ecole WHERE id = $1",
+      `SELECT
+         e.nom_complet_ecole AS nom,
+         e.date_creation,
+         tl.nom AS plan,
+         tl.prix_unitaire,
+         COUNT(l.id) AS nb_licences,
+         COUNT(l.id) FILTER (WHERE l.statut = 'assignee') AS licences_utilisees,
+         MIN(l.date_debut) AS date_debut,
+         CASE WHEN BOOL_OR(l.date_fin IS NULL) THEN NULL ELSE MAX(l.date_fin) END AS date_expiration
+       FROM ecole e
+       JOIN type_licence tl ON tl.id = e.type_licence_id
+       LEFT JOIN licence l ON l.ecole_id = e.id
+       WHERE e.id = $1
+       GROUP BY e.id, tl.nom, tl.prix_unitaire`,
       [req.auth.ecoleId]
     );
     if (!rows.length) return res.status(404).json({ error: 'Organisation introuvable' });
-    res.json(rows[0]);
+    res.json(serializeOrg(rows[0]));
   } catch (err) { next(err); }
 });
 
