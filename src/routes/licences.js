@@ -23,7 +23,7 @@ router.patch('/:id/assign', async (req, res, next) => {
     );
     if (rowCount === 0) {
       return res.status(404).json({
-        error: "Licence introuvable, déjà assignée ou n'appartient pas à votre école",
+        error: "Licence introuvable, déjà assignée ou n'appartient pas à votre organisation",
       });
     }
     res.json({ message: 'Licence assignée avec succès' });
