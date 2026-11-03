@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const pool = require('../db');
 const config = require('../config');
 const { generateTempJwt } = require('../middleware/auth');
+const messagerie = require('../messagerie');
 
 const VALID_ROLES = ['admin', 'scolarite', 'eleve', 'enseignant'];
 
@@ -346,6 +347,48 @@ router.patch('/contact', async (req, res, next) => {
       );
     }
     res.json({ message: 'Contact mis à jour' });
+  } catch (err) { next(err); }
+});
+
+// ── Messages (conversations avec l'équipe Cubi) ───────────────────────────────
+
+router.get('/messages', async (req, res, next) => {
+  try {
+    res.json(await messagerie.listConversations('ecole', req.auth.ecoleId));
+  } catch (err) { next(err); }
+});
+
+router.post('/messages', async (req, res, next) => {
+  try {
+    const invalid = messagerie.validate(req.body, { withObjet: true });
+    if (invalid) return res.status(422).json({ message: invalid });
+
+    const id = await messagerie.createConversation(
+      req.auth.ecoleId, 'ecole', req.auth.userId, req.body.objet, req.body.contenu
+    );
+    res.json({ id, message: 'Message envoyé' });
+  } catch (err) { next(err); }
+});
+
+router.get('/messages/:id', async (req, res, next) => {
+  try {
+    const thread = messagerie.isUuid(req.params.id)
+      ? await messagerie.getThread(req.params.id, 'ecole', req.auth.ecoleId)
+      : null;
+    if (!thread) return res.status(404).json({ error: 'Conversation introuvable' });
+    res.json(thread);
+  } catch (err) { next(err); }
+});
+
+router.post('/messages/:id/reponses', async (req, res, next) => {
+  try {
+    const invalid = messagerie.validate(req.body, { withObjet: false });
+    if (invalid) return res.status(422).json({ message: invalid });
+
+    const ok = messagerie.isUuid(req.params.id)
+      && await messagerie.addMessage(req.params.id, 'ecole', req.auth.userId, req.body.contenu, req.auth.ecoleId);
+    if (!ok) return res.status(404).json({ error: 'Conversation introuvable' });
+    res.json({ message: 'Réponse envoyée' });
   } catch (err) { next(err); }
 });
 
