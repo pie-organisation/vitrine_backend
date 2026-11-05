@@ -32,7 +32,7 @@ function requireCubi(...roles) {
 
 function requireEcoleAdmin(req, res, next) {
   if (!req.auth || req.auth.type !== 'ecole' || req.auth.role !== 'admin') {
-    return res.status(403).json({ error: 'Rôle admin école requis' });
+    return res.status(403).json({ error: 'Rôle admin organisation requis' });
   }
   next();
 }
