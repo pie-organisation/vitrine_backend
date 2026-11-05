@@ -4,18 +4,20 @@ const bcrypt = require('bcryptjs');
 const pool = require('../db');
 const config = require('../config');
 const { generateTempJwt, requireCubi } = require('../middleware/auth');
+const messagerie = require('../messagerie');
 
 // ── Métriques ─────────────────────────────────────────────────────────────────
 
 router.get('/metriques', async (req, res, next) => {
   try {
-    const [orgs, users, sessions, licAvail, licAssigned, demandes] = await Promise.all([
+    const [orgs, users, sessions, licAvail, licAssigned, demandes, messagesNonLus] = await Promise.all([
       pool.query("SELECT COUNT(*) FROM ecole WHERE statut = 'actif'"),
       pool.query("SELECT COUNT(*) FROM utilisateur WHERE statut = 'actif'"),
       pool.query("SELECT COUNT(*) FROM session WHERE statut = 'active'"),
       pool.query("SELECT COUNT(*) FROM licence WHERE statut = 'disponible'"),
       pool.query("SELECT COUNT(*) FROM licence WHERE statut = 'assignee'"),
       pool.query("SELECT COUNT(*) FROM demande_inscription WHERE statut = 'en_attente'"),
+      pool.query("SELECT COUNT(*) FROM conversation WHERE lu_par_cubi = FALSE"),
     ]);
     res.json({
       nb_organisations:       parseInt(orgs.rows[0].count),
@@ -24,6 +26,7 @@ router.get('/metriques', async (req, res, next) => {
       nb_licences_disponibles: parseInt(licAvail.rows[0].count),
       nb_licences_assignees:  parseInt(licAssigned.rows[0].count),
       nb_demandes_en_attente: parseInt(demandes.rows[0].count),
+      nb_messages_non_lus:    parseInt(messagesNonLus.rows[0].count),
     });
   } catch (err) { next(err); }
 });
@@ -567,10 +570,47 @@ router.delete('/equipe/:id', requireCubi('super_admin'), async (req, res, next) 
   } catch (err) { next(err); }
 });
 
-// ── Messages (stubs) ──────────────────────────────────────────────────────────
+// ── Messages (conversations avec les organisations) ───────────────────────────
 
-router.get('/messages', (req, res) => res.json([]));
-router.patch('/messages/:id', requireCubi('super_admin'), (req, res) => res.json({ message: 'Message mis à jour' }));
+router.get('/messages', async (req, res, next) => {
+  try {
+    res.json(await messagerie.listConversations('cubi'));
+  } catch (err) { next(err); }
+});
+
+router.get('/messages/:id', async (req, res, next) => {
+  try {
+    const thread = messagerie.isUuid(req.params.id)
+      ? await messagerie.getThread(req.params.id, 'cubi')
+      : null;
+    if (!thread) return res.status(404).json({ error: 'Conversation introuvable' });
+    res.json(thread);
+  } catch (err) { next(err); }
+});
+
+router.post('/messages/:id/reponses', requireCubi('super_admin', 'support'), async (req, res, next) => {
+  try {
+    const invalid = messagerie.validate(req.body, { withObjet: false });
+    if (invalid) return res.status(422).json({ message: invalid });
+
+    const ok = messagerie.isUuid(req.params.id)
+      && await messagerie.addMessage(req.params.id, 'cubi', req.auth.userId, req.body.contenu);
+    if (!ok) return res.status(404).json({ error: 'Conversation introuvable' });
+    res.json({ message: 'Réponse envoyée' });
+  } catch (err) { next(err); }
+});
+
+router.patch('/messages/:id', requireCubi('super_admin', 'support'), async (req, res, next) => {
+  try {
+    const { statut } = req.body;
+    if (!['ouverte', 'traitee'].includes(statut)) {
+      return res.status(422).json({ message: 'Statut invalide' });
+    }
+    const ok = messagerie.isUuid(req.params.id) && await messagerie.setStatut(req.params.id, statut);
+    if (!ok) return res.status(404).json({ error: 'Conversation introuvable' });
+    res.json({ message: 'Conversation mise à jour' });
+  } catch (err) { next(err); }
+});
 
 // ── Offres ────────────────────────────────────────────────────────────────────
 
