@@ -340,6 +340,17 @@ function serializeDemande(r) {
     prenomContact: r.prenom_contact || '',
     emailContact: r.email || '',
     visaEcole: r.visa_ecole || undefined,
+    etablissements: (r.etablissements || []).map(e => ({
+      nom: e.nom,
+      siret: e.siret,
+      visa: e.visa || undefined,
+      adresse: e.adresse,
+      codePostal: e.code_postal,
+      ville: e.ville,
+      nomResponsable: e.nom_responsable,
+      prenomResponsable: e.prenom_responsable,
+      emailResponsable: e.email_responsable,
+    })),
   };
 }
 
@@ -379,7 +390,12 @@ router.patch('/demandes/:id', requireCubi('super_admin'), async (req, res, next)
       return res.status(409).json({ error: 'Cette demande a déjà été traitée' });
     }
 
-    if (statut === 'validee' && !demande.mot_de_passe_hash) {
+    // Les demandes de groupe avec établissements n'ont pas de mot de passe :
+    // chaque responsable reçoit une invitation à la validation.
+    const etablissements = demande.etablissements || [];
+    const isGroupeMulti = demande.type_demande === 'groupe' && etablissements.length > 0;
+
+    if (statut === 'validee' && !isGroupeMulti && !demande.mot_de_passe_hash) {
       await client.query('ROLLBACK');
       return res.status(422).json({
         message: "Cette demande a été soumise avant la mise à jour du formulaire et n'a pas de mot de passe enregistré. Demande au requérant de soumettre une nouvelle demande d'inscription.",
@@ -390,6 +406,8 @@ router.patch('/demandes/:id', requireCubi('super_admin'), async (req, res, next)
       "UPDATE demande_inscription SET statut = $1, date_traitement = NOW() WHERE id = $2",
       [statut, req.params.id]
     );
+
+    const invitations = [];
 
     if (statut === 'validee') {
       if (demande.type_demande === 'ecole') {
@@ -410,12 +428,36 @@ router.patch('/demandes/:id', requireCubi('super_admin'), async (req, res, next)
           [ecoleRows[0].id, demande.nom_contact, demande.prenom_contact, demande.email, demande.mot_de_passe_hash]
         );
       } else {
-        await client.query(
+        // Pas de connexion au niveau du groupe : le hash n'est jamais utilisé, mais la colonne est NOT NULL.
+        const groupeHash = demande.mot_de_passe_hash || await bcrypt.hash(generateTempPassword(), 12);
+        const { rows: groupeRows } = await client.query(
           `INSERT INTO groupe_scolaire
              (nom_du_siege, nom_DAF, prenom_DAF, type_licence_id, mot_de_passe_hash, statut)
-           VALUES ($1, $2, $3, $4, $5, 'actif')`,
-          [demande.nom_siege_ou_ecole, demande.nom_daf, demande.prenom_daf, demande.type_licence_id, demande.mot_de_passe_hash]
+           VALUES ($1, $2, $3, $4, $5, 'actif')
+           RETURNING id`,
+          [demande.nom_siege_ou_ecole, demande.nom_daf, demande.prenom_daf, demande.type_licence_id, groupeHash]
         );
+
+        // Un établissement + un compte admin (mot de passe à définir) par responsable.
+        for (const e of etablissements) {
+          const placeholderHash = await bcrypt.hash(generateTempPassword(), 12);
+          const { rows: ecoleRows } = await client.query(
+            `INSERT INTO ecole
+               (groupe_scolaire_id, nom_complet_ecole, siret, adresse, code_postal, ville,
+                type_licence_id, mot_de_passe_hash, statut)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'actif')
+             RETURNING id`,
+            [groupeRows[0].id, e.nom, e.siret, e.adresse, e.code_postal, e.ville, demande.type_licence_id, placeholderHash]
+          );
+          const userId = randomUUID();
+          await client.query(
+            `INSERT INTO utilisateur
+               (id, ecole_id, nom, prenom, email, mot_de_passe_hash, mdp_temporaire, role, statut)
+             VALUES ($1, $2, $3, $4, $5, $6, TRUE, 'admin', 'actif')`,
+            [userId, ecoleRows[0].id, e.nom_responsable, e.prenom_responsable, e.email_responsable, placeholderHash]
+          );
+          invitations.push({ ...e, userId, ecoleId: ecoleRows[0].id });
+        }
       }
     }
 
@@ -423,16 +465,36 @@ router.patch('/demandes/:id', requireCubi('super_admin'), async (req, res, next)
 
     if (statut === 'validee') {
       try {
-        await sendDemandeAcceptedEmail(demande.email, demande.prenom_contact || demande.prenom_daf, demande.type_demande);
+        await sendDemandeAcceptedEmail(
+          demande.email, demande.prenom_contact || demande.prenom_daf, demande.type_demande, invitations.length
+        );
       } catch (e) {
         console.warn(`Échec envoi email d'acceptation pour ${demande.email} : ${e.message}`);
+      }
+      for (const inv of invitations) {
+        try {
+          const token = generateTempJwt({ id: inv.userId, ecole_id: inv.ecoleId, role: 'admin' }, 'ecole');
+          await sendWelcomeEmail(inv.email_responsable, inv.prenom_responsable, token, config.frontendUrl);
+        } catch (e) {
+          console.warn(`Échec envoi invitation pour ${inv.email_responsable} : ${e.message}`);
+        }
       }
     }
 
     console.log(`Demande ${req.params.id} ${statut} par ${req.auth.userId}`);
-    res.json({ message: statut === 'validee' ? 'Demande validée, compte créé' : 'Demande refusée' });
+    res.json({
+      message: statut === 'refusee' ? 'Demande refusée'
+        : invitations.length ? `Demande validée : ${invitations.length} établissements créés, invitations envoyées`
+        : 'Demande validée, compte créé',
+    });
   } catch (err) {
     await client.query('ROLLBACK');
+    // SIRET ou email pris entre la demande et sa validation (contraintes UNIQUE)
+    if (err.code === '23505') {
+      return res.status(422).json({
+        message: "Un SIRET ou un email de cette demande est déjà utilisé sur CUBI. Rien n'a été créé.",
+      });
+    }
     next(err);
   } finally {
     client.release();
@@ -735,11 +797,13 @@ function generateTempPassword() {
   return pwd;
 }
 
-async function sendDemandeAcceptedEmail(email, prenom, typeDemande) {
+async function sendDemandeAcceptedEmail(email, prenom, typeDemande, nbEtablissements = 0) {
   const loginUrl = `${config.frontendUrl}/login`;
   const textContent = typeDemande === 'ecole'
     ? `Bonjour ${prenom},\n\nBonne nouvelle : votre demande d'inscription a été validée par notre équipe.\n\nVous pouvez dès maintenant vous connecter avec l'email et le mot de passe que vous avez choisis lors de votre inscription :\n${loginUrl}\n\nL'équipe CUBI`
-    : `Bonjour ${prenom},\n\nBonne nouvelle : la demande d'inscription de votre groupe scolaire a été validée par notre équipe.\n\nNotre équipe revient vers vous prochainement pour la suite.\n\nL'équipe CUBI`;
+    : nbEtablissements > 0
+      ? `Bonjour ${prenom},\n\nBonne nouvelle : la demande d'inscription de votre groupe a été validée par notre équipe.\n\nLes ${nbEtablissements} établissements ont été créés. Chaque responsable d'établissement a reçu un email pour définir son mot de passe et accéder à son espace CUBI.\n\nL'équipe CUBI`
+      : `Bonjour ${prenom},\n\nBonne nouvelle : la demande d'inscription de votre groupe scolaire a été validée par notre équipe.\n\nNotre équipe revient vers vous prochainement pour la suite.\n\nL'équipe CUBI`;
 
   const res = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',

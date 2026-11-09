@@ -15,6 +15,70 @@ router.get('/licences', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+const ETABLISSEMENTS_MAX = 50;
+
+function missingFields(fields) {
+  return Object.entries(fields).filter(([, v]) => !v || !String(v).trim()).map(([k]) => k);
+}
+
+// Valide la liste d'établissements d'une demande de groupe.
+// Renvoie { error } ou { etablissements } normalisés.
+async function validateEtablissements(list) {
+  if (!Array.isArray(list) || list.length < 2) {
+    return { error: 'Un groupe doit compter au moins deux établissements.' };
+  }
+  if (list.length > ETABLISSEMENTS_MAX) {
+    return { error: `Un groupe ne peut pas dépasser ${ETABLISSEMENTS_MAX} établissements.` };
+  }
+
+  const etablissements = [];
+  for (const [i, e] of list.entries()) {
+    const n = i + 1;
+    const missing = missingFields({
+      nom: e?.nom, siret: e?.siret, adresse: e?.adresse, code_postal: e?.code_postal, ville: e?.ville,
+      nom_responsable: e?.nom_responsable, prenom_responsable: e?.prenom_responsable,
+      email_responsable: e?.email_responsable,
+    });
+    if (missing.length) {
+      return { error: `Établissement ${n} : champs obligatoires manquants (${missing.join(', ')}).` };
+    }
+    const siret = String(e.siret).replace(/\D/g, '');
+    if (siret.length !== 14) {
+      return { error: `Établissement ${n} : le SIRET doit contenir exactement 14 chiffres.` };
+    }
+    etablissements.push({
+      nom: e.nom.trim(), siret, visa: e.visa?.trim() || null,
+      adresse: e.adresse.trim(), code_postal: String(e.code_postal).trim(), ville: e.ville.trim(),
+      nom_responsable: e.nom_responsable.trim(), prenom_responsable: e.prenom_responsable.trim(),
+      email_responsable: e.email_responsable.trim().toLowerCase(),
+    });
+  }
+
+  const sirets = etablissements.map(e => e.siret);
+  const emails = etablissements.map(e => e.email_responsable);
+  if (new Set(sirets).size !== sirets.length) {
+    return { error: 'Deux établissements ont le même SIRET.' };
+  }
+  if (new Set(emails).size !== emails.length) {
+    return { error: 'Chaque établissement doit avoir un responsable avec un email différent.' };
+  }
+
+  const { rows: siretTaken } = await pool.query(
+    'SELECT siret FROM ecole WHERE siret = ANY($1::text[])', [sirets]
+  );
+  if (siretTaken.length) {
+    return { error: `Le SIRET ${siretTaken[0].siret.trim()} est déjà inscrit sur CUBI.` };
+  }
+  const { rows: emailTaken } = await pool.query(
+    'SELECT email FROM utilisateur WHERE LOWER(email) = ANY($1::text[])', [emails]
+  );
+  if (emailTaken.length) {
+    return { error: `Un compte existe déjà avec l'email ${emailTaken[0].email}.` };
+  }
+
+  return { etablissements };
+}
+
 // POST /auth/inscription
 router.post('/inscription', async (req, res, next) => {
   try {
@@ -27,6 +91,48 @@ router.post('/inscription', async (req, res, next) => {
     if (!['ecole', 'groupe'].includes(type)) {
       return res.status(422).json({ message: 'Type de demande invalide' });
     }
+
+    // Groupe : une seule demande pour plusieurs établissements. Pas de mot de passe ici :
+    // chaque responsable d'établissement définira le sien via l'email d'invitation.
+    if (type === 'groupe') {
+      const missing = missingFields({
+        nom_siege, nom_daf, prenom_daf, type_licence_id, nom_contact, prenom_contact, email,
+      });
+      if (missing.length) {
+        return res.status(422).json({ message: `Champs obligatoires manquants : ${missing.join(', ')}` });
+      }
+      const { rows: licenceRows } = await pool.query(
+        "SELECT id FROM type_licence WHERE id = $1 AND actif = TRUE",
+        [type_licence_id]
+      );
+      if (!licenceRows.length) {
+        return res.status(422).json({ message: 'Licence sélectionnée invalide' });
+      }
+      const result = await validateEtablissements(req.body.etablissements);
+      // 422 aussi pour les doublons : le client n'affiche le message précis que pour 422.
+      if (result.error) return res.status(422).json({ message: result.error });
+
+      await pool.query(
+        `INSERT INTO demande_inscription
+           (type_demande, nom_siege_ou_ecole, nom_daf, prenom_daf, type_licence_id,
+            nom_contact, prenom_contact, email, etablissements, statut)
+         VALUES ('groupe', $1, $2, $3, $4, $5, $6, $7, $8, 'en_attente')`,
+        [
+          nom_siege.trim(), nom_daf.trim(), prenom_daf.trim(), type_licence_id,
+          nom_contact.trim(), prenom_contact.trim(), email.trim(), JSON.stringify(result.etablissements),
+        ]
+      );
+
+      try {
+        await sendPendingEmail(email, prenom_contact);
+      } catch (e) {
+        console.warn(`Échec envoi email de confirmation pour ${email} : ${e.message}`);
+      }
+
+      console.log(`Demande d'inscription de groupe soumise : ${email} (${result.etablissements.length} établissements)`);
+      return res.json({ message: "Votre demande a été reçue. Un administrateur la traitera sous 48h." });
+    }
+
     const required = {
       nom_siege, nom_daf, prenom_daf, nom_ecole, siret, adresse, code_postal, ville,
       type_licence_id, nom_contact, prenom_contact, email, mot_de_passe, mot_de_passe_confirm,
