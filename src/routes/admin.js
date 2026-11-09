@@ -578,6 +578,44 @@ router.get('/messages', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Organisations à qui l'équipe Cubi peut écrire. Déclarée avant /messages/:id,
+// sinon "clients" serait pris pour un id de conversation.
+router.get('/messages/clients', async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT e.id, e.nom_complet_ecole AS nom, e.ville, e.statut,
+              COALESCE(
+                (SELECT u.email FROM utilisateur u
+                 WHERE u.ecole_id = e.id AND u.role = 'admin'
+                 ORDER BY u.date_invitation LIMIT 1),
+                (SELECT cf.email_facturation FROM contact_facturation cf
+                 WHERE cf.ecole_id = e.id LIMIT 1)
+              ) AS email
+       FROM ecole e
+       ORDER BY e.nom_complet_ecole`
+    );
+    res.json(rows.map(r => ({
+      id: r.id, nom: r.nom, ville: r.ville, statut: r.statut, email: r.email || null,
+    })));
+  } catch (err) { next(err); }
+});
+
+router.post('/messages', requireCubi('super_admin', 'support'), async (req, res, next) => {
+  try {
+    const { ecoleId, objet, contenu } = req.body;
+    const invalid = messagerie.validate({ objet, contenu }, { withObjet: true });
+    if (invalid) return res.status(422).json({ message: invalid });
+
+    const { rows } = messagerie.isUuid(ecoleId)
+      ? await pool.query('SELECT 1 FROM ecole WHERE id = $1', [ecoleId])
+      : { rows: [] };
+    if (!rows.length) return res.status(404).json({ error: 'Organisation introuvable' });
+
+    const id = await messagerie.createConversation(ecoleId, 'cubi', req.auth.userId, objet, contenu);
+    res.json({ id, message: 'Message envoyé' });
+  } catch (err) { next(err); }
+});
+
 router.get('/messages/:id', async (req, res, next) => {
   try {
     const thread = messagerie.isUuid(req.params.id)
