@@ -221,8 +221,73 @@ router.get('/organisations/:id', async (req, res, next) => {
       admins = adminRows.map(a => ({ id: a.id, nom: a.nom, prenom: a.prenom, email: a.email, role: 'Administrateur' }));
     }
 
-    res.json({ ...serializeOrgSummary(org), admins });
+    let nbEtablissements = 1;
+    if (org.type === 'groupe') {
+      const { rows: [c] } = await pool.query(
+        'SELECT COUNT(*) FROM ecole WHERE groupe_scolaire_id = $1', [org.id]
+      );
+      nbEtablissements = parseInt(c.count, 10);
+    }
+
+    res.json({ ...serializeOrgSummary(org), admins, nbEtablissements });
   } catch (err) { next(err); }
+});
+
+// Suppression définitive d'une organisation et de tout ce qui lui est lié.
+// Un groupe est supprimé avec tous ses établissements. Ordre imposé par les
+// clés étrangères en RESTRICT : sessions -> licences -> comptes -> établissements.
+router.delete('/organisations/:id', requireCubi('super_admin'), async (req, res, next) => {
+  if (!messagerie.isUuid(req.params.id)) {
+    return res.status(404).json({ error: 'Organisation introuvable' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    let ecoleIds;
+    let groupeId = null;
+    const { rows: ecole } = await client.query('SELECT id FROM ecole WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (ecole.length) {
+      ecoleIds = [ecole[0].id];
+    } else {
+      const { rows: groupe } = await client.query(
+        'SELECT id FROM groupe_scolaire WHERE id = $1 FOR UPDATE', [req.params.id]
+      );
+      if (!groupe.length) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Organisation introuvable' });
+      }
+      groupeId = groupe[0].id;
+      const { rows } = await client.query('SELECT id FROM ecole WHERE groupe_scolaire_id = $1', [groupeId]);
+      ecoleIds = rows.map(r => r.id);
+    }
+
+    // Les journaux d'activité partent en cascade avec les sessions ; classes, contact
+    // de facturation et conversations partent en cascade avec l'établissement.
+    await client.query(
+      `DELETE FROM session
+       WHERE utilisateur_id IN (SELECT id FROM utilisateur WHERE ecole_id = ANY($1::uuid[]))
+          OR licence_id     IN (SELECT id FROM licence     WHERE ecole_id = ANY($1::uuid[]))`,
+      [ecoleIds]
+    );
+    await client.query('DELETE FROM licence WHERE ecole_id = ANY($1::uuid[])', [ecoleIds]);
+    const { rowCount: nbComptes } = await client.query(
+      'DELETE FROM utilisateur WHERE ecole_id = ANY($1::uuid[])', [ecoleIds]
+    );
+    await client.query('DELETE FROM ecole WHERE id = ANY($1::uuid[])', [ecoleIds]);
+    if (groupeId) await client.query('DELETE FROM groupe_scolaire WHERE id = $1', [groupeId]);
+
+    await client.query('COMMIT');
+    console.log(`Organisation ${req.params.id} supprimée par ${req.auth.userId} (${ecoleIds.length} établissement(s), ${nbComptes} compte(s))`);
+    res.json({
+      message: `Organisation supprimée (${ecoleIds.length} établissement${ecoleIds.length > 1 ? 's' : ''}, ${nbComptes} compte${nbComptes > 1 ? 's' : ''})`,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    next(err);
+  } finally {
+    client.release();
+  }
 });
 
 // ── Plans (type_licence) ──────────────────────────────────────────────────────
