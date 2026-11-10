@@ -20,6 +20,8 @@ services:
         sync: false
       - key: FRONT_URL
         sync: false
+      - key: SIGNATURE_CORS_EXTRA
+        sync: false
       - key: JOB_SECRET
         sync: false
       - key: FRAIS_MISE_EN_SERVICE_CENTIMES

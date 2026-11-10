@@ -16,6 +16,10 @@ module.exports = {
   appPort: parseInt(process.env.PORT || process.env.APP_PORT || '3000', 10),
   // FRONT_URL (FRONTEND_URL accepté pour compatibilité), sans slash final : sert aussi d'origine CORS exacte
   frontendUrl: (process.env.FRONT_URL || process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, ''),
+  // Origines supplémentaires autorisées en CORS sur /signature (ex. http://localhost:5173 pour tester un front
+  // local contre l'API déployée), séparées par des virgules. Vide = FRONT_URL seule. Les liens e-mail restent sur FRONT_URL.
+  signatureCorsExtra: (process.env.SIGNATURE_CORS_EXTRA || '')
+    .split(',').map(o => o.trim().replace(/\/+$/, '')).filter(Boolean),
   // Secret du endpoint POST /internal/jobs/quotidien (header X-Job-Secret). Vide = endpoint désactivé
   jobSecret: process.env.JOB_SECRET || '',
   // Frais de mise en service HT ajoutés à la première facture d'un contrat (0 = aucune ligne)

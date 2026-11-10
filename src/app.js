@@ -24,7 +24,8 @@ app.set('trust proxy', 1);
 
 // ── Signature publique : CORS limité au front, corps jusqu'à 400 Ko (image de signature) ──
 // Montée avant le CORS ouvert et le parseur JSON globaux (limite 100 Ko).
-app.use('/signature', cors({ origin: config.frontendUrl }), express.json({ limit: '400kb' }), signatureRouter);
+const originesSignature = [config.frontendUrl, ...config.signatureCorsExtra];
+app.use('/signature', cors({ origin: originesSignature }), express.json({ limit: '400kb' }), signatureRouter);
 
 app.use(cors());
 app.use(express.json());

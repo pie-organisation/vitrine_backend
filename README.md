@@ -267,6 +267,8 @@ La fonction du signataire n'est pas connue à l'inscription, ni l'adresse du si�
 
 ### Routes publiques de signature (token du lien, CORS limité à `FRONT_URL`, rate-limit)
 
+Pour tester un front local contre l'API déployée, ajouter son origine dans `SIGNATURE_CORS_EXTRA` (ex. `http://localhost:5173`, plusieurs valeurs séparées par des virgules), puis la retirer après les tests. Les liens envoyés par e-mail restent construits sur `FRONT_URL`.
+
 Toute erreur liée au lien est **générique** : 404 `{ error: 'Ce lien de signature est invalide ou a expiré.' }`, que le token n'existe pas, soit expiré ou révoqué. Convention : `{ message }` pour les 422 (à afficher tel quel), `{ error }` sinon.
 
 | Méthode | Route | Body | Réponse |
