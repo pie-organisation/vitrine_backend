@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 process.env.DATABASE_URL = 'postgres://aucune@127.0.0.1:1/aucune';
 process.env.JWT_SECRET = 'test';
 process.env.FRONT_URL = 'http://front.test/';
+process.env.SIGNATURE_CORS_EXTRA = ' http://localhost:5173/ , ';
 process.env.JOB_SECRET = 'secret-du-job';
 process.env.APP_ENV = 'test';
 
@@ -68,6 +69,8 @@ test('CORS : /signature n\'autorise que FRONT_URL, le reste de l\'API reste ouve
   });
   let res = await preflight('http://front.test');
   assert.equal(res.headers.get('access-control-allow-origin'), 'http://front.test', 'slash final de FRONT_URL ignoré');
+  res = await preflight('http://localhost:5173');
+  assert.equal(res.headers.get('access-control-allow-origin'), 'http://localhost:5173', 'origine de SIGNATURE_CORS_EXTRA autorisée');
   res = await preflight('https://malveillant.example');
   assert.notEqual(res.headers.get('access-control-allow-origin'), 'https://malveillant.example');
   assert.notEqual(res.headers.get('access-control-allow-origin'), '*');
