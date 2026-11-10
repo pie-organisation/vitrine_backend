@@ -21,6 +21,14 @@ function missingFields(fields) {
   return Object.entries(fields).filter(([, v]) => !v || !String(v).trim()).map(([k]) => k);
 }
 
+// Nombre d'utilisateurs estimé (optionnel) : null si absent, undefined si invalide
+const LICENCES_MAX = 100000;
+function parseNbLicences(valeur) {
+  if (valeur === undefined || valeur === null || valeur === '') return null;
+  const n = Number(valeur);
+  return Number.isInteger(n) && n > 0 && n <= LICENCES_MAX ? n : undefined;
+}
+
 // Valide la liste d'établissements d'une demande de groupe.
 // Renvoie { error } ou { etablissements } normalisés.
 async function validateEtablissements(list) {
@@ -46,7 +54,12 @@ async function validateEtablissements(list) {
     if (siret.length !== 14) {
       return { error: `Établissement ${n} : le SIRET doit contenir exactement 14 chiffres.` };
     }
+    const nbLicences = parseNbLicences(e.nb_licences_estime);
+    if (nbLicences === undefined) {
+      return { error: `Établissement ${n} : le nombre d'utilisateurs estimé doit être un entier entre 1 et ${LICENCES_MAX}.` };
+    }
     etablissements.push({
+      nb_licences_estime: nbLicences,
       nom: e.nom.trim(), siret, visa: e.visa?.trim() || null,
       adresse: e.adresse.trim(), code_postal: String(e.code_postal).trim(), ville: e.ville.trim(),
       nom_responsable: e.nom_responsable.trim(), prenom_responsable: e.prenom_responsable.trim(),
@@ -152,6 +165,10 @@ router.post('/inscription', async (req, res, next) => {
     if (siretDigits.length !== 14) {
       return res.status(422).json({ message: 'Le SIRET doit contenir exactement 14 chiffres.' });
     }
+    const nbLicences = parseNbLicences(req.body.nb_licences_estime);
+    if (nbLicences === undefined) {
+      return res.status(422).json({ message: `Le nombre d'utilisateurs estimé doit être un entier entre 1 et ${LICENCES_MAX}.` });
+    }
 
     const { rows: emailTaken } = await pool.query(
       "SELECT EXISTS(SELECT 1 FROM utilisateur WHERE email = $1) AS exists",
@@ -175,11 +192,11 @@ router.post('/inscription', async (req, res, next) => {
       `INSERT INTO demande_inscription
          (type_demande, nom_siege_ou_ecole, nom_daf, prenom_daf, nom_ecole, siret, visa_ecole,
           adresse, code_postal, ville, type_licence_id, nom_contact, prenom_contact, email,
-          mot_de_passe_hash, statut)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'en_attente')`,
+          mot_de_passe_hash, nb_licences_estime, statut)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'en_attente')`,
       [
         type, nom_siege, nom_daf, prenom_daf, nom_ecole, siretDigits, visa_ecole || null,
-        adresse, code_postal, ville, type_licence_id, nom_contact, prenom_contact, email, hash,
+        adresse, code_postal, ville, type_licence_id, nom_contact, prenom_contact, email, hash, nbLicences,
       ]
     );
 
@@ -216,6 +233,24 @@ router.post('/login', async (req, res, next) => {
     const user = rows[0];
     const valid = await bcrypt.compare(mot_de_passe, user.mot_de_passe_hash);
     if (!valid) return res.status(401).json({ error: 'Identifiants invalides' });
+
+    // Compte d'établissement : l'école et, le cas échéant, son groupe doivent être actifs
+    // (contrat signé, organisation non suspendue). Vérifié après le mot de passe pour ne rien révéler.
+    if (type === 'ecole') {
+      const { rows: orgRows } = await pool.query(
+        `SELECT e.statut AS statut_ecole, g.statut AS statut_groupe
+         FROM ecole e LEFT JOIN groupe_scolaire g ON g.id = e.groupe_scolaire_id
+         WHERE e.id = $1`,
+        [user.ecole_id]
+      );
+      const org = orgRows[0];
+      if (!org || org.statut_ecole !== 'actif' || (org.statut_groupe && org.statut_groupe !== 'actif')) {
+        return res.status(403).json({
+          error: 'organisation_inactive',
+          message: "L'accès de votre établissement à CUBI n'est pas actif (contrat non signé ou compte suspendu). Contactez l'équipe Cubi.",
+        });
+      }
+    }
 
     if (user.mdp_temporaire) {
       return res.status(403).json({ error: 'reset_required' });

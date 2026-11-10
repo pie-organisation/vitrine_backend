@@ -1,0 +1,174 @@
+{
+  "facture": {
+    "issuer": {
+      "legalName": "CUBI SAS",
+      "legalForm": "SAS",
+      "capital": "10 000 €",
+      "address": "12 rue de la Paix, 75001 Paris",
+      "siret": "123 456 789 00012",
+      "rcs": "RCS Paris",
+      "vatNumber": "FR12 123456789",
+      "billingEmail": "facturation@cubi.fr",
+      "iban": "FR76 3000 4000 5000 0000 0000 000",
+      "bic": "BNPAFRPPXXX",
+      "paymentTermsDays": 30,
+      "signatoryName": "M. A. Durand",
+      "signatoryRole": "Président"
+    },
+    "client": {
+      "name": "Lycée Les Tilleuls",
+      "legalForm": "Établissement public local d'enseignement",
+      "billingContact": "Service comptabilité — Mme C. Martin",
+      "address": "48 avenue de la République, 92000 Nanterre",
+      "siret": "987 654 321 00045",
+      "purchaseOrder": "EJ-2026-0871"
+    },
+    "invoice": {
+      "number": "FAC-2026-0142",
+      "issuedAt": "2026-11-06",
+      "dueAt": "2026-12-06",
+      "periodLabel": "Nov. 2026",
+      "contractNumber": "CTR-2026-0037",
+      "totalHtCents": 217100,
+      "totalTtcCents": 260520,
+      "vatBreakdown": [
+        {
+          "rate": 20,
+          "amountCents": 43420
+        }
+      ]
+    },
+    "lines": [
+      {
+        "label": "Licences Étudiant — Offre École",
+        "description": "Poste Windows cloud, accès multi-appareil",
+        "quantity": 250,
+        "unitPriceCents": 650,
+        "vatRate": 20,
+        "totalHtCents": 162500
+      },
+      {
+        "label": "Licences Enseignant Premium",
+        "description": "Console de classe, suivi des sessions",
+        "quantity": 18,
+        "unitPriceCents": 1200,
+        "vatRate": 20,
+        "totalHtCents": 21600
+      },
+      {
+        "label": "Pack GPU on-demand — 200 h",
+        "quantity": 1,
+        "unitPriceCents": 18000,
+        "vatRate": 20,
+        "totalHtCents": 18000
+      },
+      {
+        "label": "Frais de mise en service",
+        "quantity": 1,
+        "unitPriceCents": 15000,
+        "vatRate": 20,
+        "totalHtCents": 15000
+      }
+    ]
+  },
+  "contrat": {
+    "issuer": {
+      "legalName": "CUBI SAS",
+      "legalForm": "SAS",
+      "capital": "10 000 €",
+      "address": "12 rue de la Paix, 75001 Paris",
+      "siret": "123 456 789 00012",
+      "rcs": "RCS Paris",
+      "vatNumber": "FR12 123456789",
+      "billingEmail": "facturation@cubi.fr",
+      "iban": "FR76 3000 4000 5000 0000 0000 000",
+      "bic": "BNPAFRPPXXX",
+      "paymentTermsDays": 30,
+      "signatoryName": "M. A. Durand",
+      "signatoryRole": "Président"
+    },
+    "client": {
+      "name": "Lycée Les Tilleuls",
+      "legalForm": "Établissement public local d'enseignement",
+      "billingContact": "Service comptabilité — Mme C. Martin",
+      "address": "48 avenue de la République, 92000 Nanterre",
+      "siret": "987 654 321 00045",
+      "purchaseOrder": "EJ-2026-0871"
+    },
+    "signer": {
+      "fullName": "Mme S. Bernard",
+      "role": "Proviseure",
+      "email": "s.bernard@tilleuls.fr"
+    },
+    "contract": {
+      "number": "CTR-2026-0037",
+      "offerName": "Offre École",
+      "offerBadge": "Volume",
+      "durationMonths": 12,
+      "startDate": "2026-11-01",
+      "billingLabel": "Mensuelle, à terme à échoir",
+      "lines": [
+        {
+          "label": "Licences Étudiant",
+          "detail": "250 licences · 6,50 € HT / licence / mois"
+        },
+        {
+          "label": "Licences Enseignant Premium",
+          "detail": "18 licences · 12,00 € HT / licence / mois"
+        },
+        {
+          "label": "Mise en service",
+          "detail": "150,00 € HT, facturés une seule fois"
+        }
+      ]
+    },
+    "signature": {
+      "issuer": {
+        "imageDataUrl": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMDAiIGhlaWdodD0iOTAiPjxwYXRoIGQ9Ik0xMCA2MCBDNDAgMTAgNjAgODAgOTAgNDAgUzE0MCAyMCAxNjAgNTUgUzIyMCA3MCAyOTAgMzAiIHN0cm9rZT0iIzFhMTA0MCIgc3Ryb2tlLXdpZHRoPSIzIiBmaWxsPSJub25lIi8+PC9zdmc+",
+        "signedAt": "2026-11-08T09:12:00Z"
+      },
+      "client": {
+        "imageDataUrl": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMDAiIGhlaWdodD0iOTAiPjxwYXRoIGQ9Ik0xMCA2MCBDNDAgMTAgNjAgODAgOTAgNDAgUzE0MCAyMCAxNjAgNTUgUzIyMCA3MCAyOTAgMzAiIHN0cm9rZT0iIzFhMTA0MCIgc3Ryb2tlLXdpZHRoPSIzIiBmaWxsPSJub25lIi8+PC9zdmc+",
+        "signedAt": "2026-11-09T14:03:22Z",
+        "mention": "Lu et approuvé",
+        "proofId": "SIG-7F3A-92C1"
+      }
+    },
+    "proof": {
+      "originalHash": "9f2c1e7a4b6d8e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081",
+      "verifyUrl": "https://cubi.fr/verify/SIG-7F3A-92C1",
+      "events": [
+        {
+          "at": "2026-11-08T09:12:00Z",
+          "label": "Contrat généré et contre-signé par CUBI",
+          "actor": "admin@cubi.fr",
+          "ip": "—"
+        },
+        {
+          "at": "2026-11-08T09:12:05Z",
+          "label": "Invitation à signer envoyée",
+          "actor": "système",
+          "ip": "—"
+        },
+        {
+          "at": "2026-11-09T13:58:40Z",
+          "label": "Document consulté",
+          "actor": "s.bernard@tilleuls.fr",
+          "ip": "81.250.12.4"
+        },
+        {
+          "at": "2026-11-09T14:02:51Z",
+          "label": "Code OTP envoyé",
+          "actor": "système",
+          "ip": "—"
+        },
+        {
+          "at": "2026-11-09T14:03:22Z",
+          "label": "Code validé — contrat signé",
+          "actor": "s.bernard@tilleuls.fr",
+          "ip": "81.250.12.4"
+        }
+      ]
+    }
+  }
+}

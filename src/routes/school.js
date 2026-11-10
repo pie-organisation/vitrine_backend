@@ -5,6 +5,9 @@ const pool = require('../db');
 const config = require('../config');
 const { generateTempJwt } = require('../middleware/auth');
 const messagerie = require('../messagerie');
+const documentStorage = require('../services/documentStorage');
+const { isoDate } = require('../pdf/mappers');
+const { factureEcole } = require('../services/vueFacture');
 
 const VALID_ROLES = ['admin', 'scolarite', 'eleve', 'enseignant'];
 
@@ -190,8 +193,101 @@ router.delete('/comptes/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /school/factures
-router.get('/factures', (req, res) => res.json([]));
+// ── Factures (lecture seule) ──────────────────────────────────────────────────
+// Celles de l'école connectée ou de son groupe ; rattachement vérifié en SQL depuis le JWT.
+const FACTURES_DE_L_ECOLE = `
+  FROM facture f
+  JOIN contrat c      ON c.id = f.contrat_id
+  LEFT JOIN facture o ON o.id = f.facture_origine_id
+  WHERE (f.ecole_id = $1
+         OR f.groupe_scolaire_id = (SELECT groupe_scolaire_id FROM ecole WHERE id = $1))`;
+
+// GET /school/factures — tableau de SchoolInvoice (forme des mocks du front) + champs détaillés
+router.get('/factures', async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT f.*, c.numero AS contrat_numero, o.numero AS facture_origine_numero
+       ${FACTURES_DE_L_ECOLE}
+       ORDER BY f.date_emission DESC, f.numero DESC`,
+      [req.auth.ecoleId]
+    );
+    res.json(rows.map(factureEcole));
+  } catch (err) { next(err); }
+});
+
+// GET /school/factures/:id/pdf
+router.get('/factures/:id/pdf', async (req, res, next) => {
+  try {
+    if (!messagerie.isUuid(req.params.id)) return res.status(404).json({ error: 'Facture introuvable' });
+    const { rows } = await pool.query(
+      `SELECT f.numero, f.document_id ${FACTURES_DE_L_ECOLE} AND f.id = $2`,
+      [req.auth.ecoleId, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Facture introuvable' });
+    const doc = await documentStorage.get(pool, rows[0].document_id);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${rows[0].numero}.pdf"`,
+      'Cache-Control': 'private, no-store',
+    });
+    res.send(doc.contenu);
+  } catch (err) { next(err); }
+});
+
+// ── Contrats (lecture seule) ──────────────────────────────────────────────────
+// Ceux de l'école connectée, ou de son groupe. Le rattachement vient toujours du JWT
+// (req.auth.ecoleId) et est vérifié dans la requête SQL elle-même, jamais d'un id client.
+const CONTRATS_DE_L_ECOLE = `
+  FROM contrat c
+  WHERE c.statut <> 'brouillon'
+    AND (c.ecole_id = $1
+         OR c.groupe_scolaire_id = (SELECT groupe_scolaire_id FROM ecole WHERE id = $1))`;
+
+// GET /school/contrats
+router.get('/contrats', async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT c.id, c.numero, c.statut, c.donnees, c.date_debut, c.duree_mois,
+              c.signataire_nom, c.date_signature_client, c.document_signe_id, c.document_original_id
+       ${CONTRATS_DE_L_ECOLE}
+       ORDER BY c.date_creation DESC`,
+      [req.auth.ecoleId]
+    );
+    res.json(rows.map(r => ({
+      id: r.id,
+      numero: r.numero,
+      statut: r.statut,
+      offre: r.donnees.offre.nom,
+      quantiteTotale: r.donnees.quantiteTotale,
+      dateDebut: isoDate(r.date_debut),
+      dureeMois: r.duree_mois,
+      signataire: r.signataire_nom,
+      dateSignature: r.date_signature_client,
+      pdfDisponible: Boolean(r.document_signe_id || r.document_original_id),
+    })));
+  } catch (err) { next(err); }
+});
+
+// GET /school/contrats/:id/pdf — signé s'il existe, sinon l'original
+router.get('/contrats/:id/pdf', async (req, res, next) => {
+  try {
+    if (!messagerie.isUuid(req.params.id)) return res.status(404).json({ error: 'Contrat introuvable' });
+    const { rows } = await pool.query(
+      `SELECT c.numero, c.document_signe_id, c.document_original_id
+       ${CONTRATS_DE_L_ECOLE} AND c.id = $2`,
+      [req.auth.ecoleId, req.params.id]
+    );
+    const docId = rows[0] && (rows[0].document_signe_id || rows[0].document_original_id);
+    if (!docId) return res.status(404).json({ error: 'Contrat introuvable' });
+    const doc = await documentStorage.get(pool, docId);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${rows[0].numero}${rows[0].document_signe_id ? '-signe' : ''}.pdf"`,
+      'Cache-Control': 'private, no-store',
+    });
+    res.send(doc.contenu);
+  } catch (err) { next(err); }
+});
 
 // GET /school/sessions
 router.get('/sessions', async (req, res, next) => {

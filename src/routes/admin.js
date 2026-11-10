@@ -3,8 +3,12 @@ const { randomUUID } = require('crypto');
 const bcrypt = require('bcryptjs');
 const pool = require('../db');
 const config = require('../config');
+const { z } = require('zod');
 const { generateTempJwt, requireCubi } = require('../middleware/auth');
 const messagerie = require('../messagerie');
+const contrats = require('../services/contrats');
+const { calculerPalier } = require('../services/palier');
+const { sendWelcomeEmail } = require('../email');
 
 // ── Métriques ─────────────────────────────────────────────────────────────────
 
@@ -262,6 +266,22 @@ router.delete('/organisations/:id', requireCubi('super_admin'), async (req, res,
       ecoleIds = rows.map(r => r.id);
     }
 
+    // Contrats et factures sont des pièces à conserver 10 ans : pas de suppression, suspension à la place
+    const { rows: [pieces] } = await client.query(
+      `SELECT
+         (SELECT COUNT(*) FROM contrat WHERE ecole_id = ANY($1::uuid[]) OR groupe_scolaire_id = $2)::int AS contrats,
+         (SELECT COUNT(*) FROM facture WHERE ecole_id = ANY($1::uuid[]) OR groupe_scolaire_id = $2)::int AS factures`,
+      [ecoleIds, groupeId]
+    );
+    if (pieces.contrats || pieces.factures) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: `Suppression impossible : cette organisation a ${pieces.contrats} contrat(s) et ${pieces.factures} facture(s), ` +
+          'pièces à conserver 10 ans. Suspends-la à la place.',
+        action: 'suspendre',
+      });
+    }
+
     // Les journaux d'activité partent en cascade avec les sessions ; classes, contact
     // de facturation et conversations partent en cascade avec l'établissement.
     await client.query(
@@ -282,6 +302,39 @@ router.delete('/organisations/:id', requireCubi('super_admin'), async (req, res,
     res.json({
       message: `Organisation supprimée (${ecoleIds.length} établissement${ecoleIds.length > 1 ? 's' : ''}, ${nbComptes} compte${nbComptes > 1 ? 's' : ''})`,
     });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+// Alternative à la suppression quand l'organisation a des contrats ou des factures :
+// l'organisation (et, pour un groupe, ses établissements) passe en 'suspendu'.
+router.post('/organisations/:id/suspendre', requireCubi('super_admin'), async (req, res, next) => {
+  if (!messagerie.isUuid(req.params.id)) {
+    return res.status(404).json({ error: 'Organisation introuvable' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rowCount: ecole } = await client.query(
+      "UPDATE ecole SET statut = 'suspendu' WHERE id = $1", [req.params.id]
+    );
+    const { rowCount: groupe } = ecole ? { rowCount: 0 } : await client.query(
+      "UPDATE groupe_scolaire SET statut = 'suspendu', date_modification = NOW() WHERE id = $1", [req.params.id]
+    );
+    if (!ecole && !groupe) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Organisation introuvable' });
+    }
+    if (groupe) {
+      await client.query("UPDATE ecole SET statut = 'suspendu' WHERE groupe_scolaire_id = $1", [req.params.id]);
+    }
+    await client.query('COMMIT');
+    console.log(`Organisation ${req.params.id} suspendue par ${req.auth.userId}`);
+    res.json({ message: 'Organisation suspendue' });
   } catch (err) {
     await client.query('ROLLBACK');
     next(err);
@@ -405,7 +458,9 @@ function serializeDemande(r) {
     prenomContact: r.prenom_contact || '',
     emailContact: r.email || '',
     visaEcole: r.visa_ecole || undefined,
+    nbLicencesEstime: r.nb_licences_estime ?? null,
     etablissements: (r.etablissements || []).map(e => ({
+      nbLicencesEstime: e.nb_licences_estime ?? null,
       nom: e.nom,
       siret: e.siret,
       visa: e.visa || undefined,
@@ -431,11 +486,23 @@ router.get('/demandes', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Validation : crée l'organisation en 'inactif' et son contrat en brouillon. Aucun compte ni e-mail
+// ici : tout part à la signature du contrat (services/onContratSigne.js).
+// Quantités : body (correction admin) sinon estimation de la demande ; palier déduit du total.
+const corpsTraitementDemande = z.object({
+  statut: z.enum(['validee', 'refusee'], { message: 'Statut invalide' }),
+  nbLicences: z.number().int().positive().max(100000).optional(),
+  etablissements: z.array(z.object({
+    siret: z.string().transform(s => s.replace(/\D/g, '')),
+    quantite: z.number().int().positive().max(100000),
+  })).optional(),
+});
+
 router.patch('/demandes/:id', requireCubi('super_admin'), async (req, res, next) => {
-  const { statut } = req.body;
-  if (!['validee', 'refusee'].includes(statut)) {
-    return res.status(422).json({ message: 'Statut invalide' });
-  }
+  const parsed = corpsTraitementDemande.safeParse(req.body);
+  if (!parsed.success) return res.status(422).json({ message: parsed.error.issues[0].message });
+  const { statut, nbLicences, etablissements: quantitesCorrigees = [] } = parsed.data;
+  if (!messagerie.isUuid(req.params.id)) return res.status(404).json({ error: 'Demande introuvable' });
 
   const client = await pool.connect();
   try {
@@ -455,105 +522,140 @@ router.patch('/demandes/:id', requireCubi('super_admin'), async (req, res, next)
       return res.status(409).json({ error: 'Cette demande a déjà été traitée' });
     }
 
-    // Les demandes de groupe avec établissements n'ont pas de mot de passe :
-    // chaque responsable reçoit une invitation à la validation.
-    const etablissements = demande.etablissements || [];
-    const isGroupeMulti = demande.type_demande === 'groupe' && etablissements.length > 0;
-
-    if (statut === 'validee' && !isGroupeMulti && !demande.mot_de_passe_hash) {
-      await client.query('ROLLBACK');
-      return res.status(422).json({
-        message: "Cette demande a été soumise avant la mise à jour du formulaire et n'a pas de mot de passe enregistré. Demande au requérant de soumettre une nouvelle demande d'inscription.",
-      });
+    if (statut === 'refusee') {
+      await client.query(
+        "UPDATE demande_inscription SET statut = 'refusee', date_traitement = NOW() WHERE id = $1",
+        [req.params.id]
+      );
+      await client.query('COMMIT');
+      console.log(`Demande ${req.params.id} refusee par ${req.auth.userId}`);
+      return res.json({ message: 'Demande refusée' });
     }
 
-    await client.query(
-      "UPDATE demande_inscription SET statut = $1, date_traitement = NOW() WHERE id = $2",
-      [statut, req.params.id]
+    // Les demandes de groupe avec établissements n'ont pas de mot de passe :
+    // chaque responsable reçoit une invitation à la signature du contrat.
+    const etablissementsDemande = demande.etablissements || [];
+    const estGroupe = demande.type_demande === 'groupe';
+    const refuser = async (message) => {
+      await client.query('ROLLBACK');
+      return res.status(422).json({ message });
+    };
+
+    if (estGroupe && !etablissementsDemande.length) {
+      return refuser("Cette demande de groupe ne liste aucun établissement : impossible d'établir un contrat (les licences sont rattachées aux établissements). Demande au groupe de soumettre une nouvelle demande.");
+    }
+    if (!estGroupe && !demande.mot_de_passe_hash) {
+      return refuser("Cette demande a été soumise avant la mise à jour du formulaire et n'a pas de mot de passe enregistré. Demande au requérant de soumettre une nouvelle demande d'inscription.");
+    }
+
+    // Quantités par établissement
+    let lignes;
+    if (estGroupe) {
+      const corrigees = new Map(quantitesCorrigees.map(q => [q.siret, q.quantite]));
+      lignes = etablissementsDemande.map(e => ({
+        nom: e.nom, siret: e.siret, quantite: corrigees.get(e.siret) ?? e.nb_licences_estime ?? null,
+      }));
+      const manquantes = lignes.filter(l => !l.quantite).map(l => l.nom);
+      if (manquantes.length) {
+        return refuser(`Quantité de licences requise pour : ${manquantes.join(', ')} (champ etablissements[].quantite).`);
+      }
+    } else {
+      const quantite = nbLicences ?? demande.nb_licences_estime;
+      if (!quantite) return refuser('Quantité de licences requise pour générer le contrat (champ nbLicences).');
+      lignes = [{ nom: demande.nom_ecole || demande.nom_siege_ou_ecole, siret: demande.siret, quantite }];
+    }
+    const palier = calculerPalier(
+      await contrats.typesLicenceActifs(client),
+      lignes.reduce((s, l) => s + l.quantite, 0)
     );
 
-    const invitations = [];
+    // Comptes créés à la signature : on refuse dès maintenant un email déjà pris
+    const emails = estGroupe ? etablissementsDemande.map(e => e.email_responsable) : [demande.email];
+    const { rows: emailsPris } = await client.query(
+      'SELECT email FROM utilisateur WHERE LOWER(email) = ANY($1::text[])',
+      [emails.map(e => e.toLowerCase())]
+    );
+    if (emailsPris.length) return refuser(`Un compte existe déjà avec l'email ${emailsPris[0].email}.`);
 
-    if (statut === 'validee') {
-      if (demande.type_demande === 'ecole') {
+    await client.query(
+      "UPDATE demande_inscription SET statut = 'validee', date_traitement = NOW() WHERE id = $1",
+      [req.params.id]
+    );
+
+    // Organisation inactive jusqu'à la signature
+    let ecoleId = null;
+    let groupeId = null;
+    let clientContrat;
+    if (!estGroupe) {
+      const { rows: ecoleRows } = await client.query(
+        `INSERT INTO ecole
+           (nom_complet_ecole, siret, adresse, code_postal, ville, type_licence_id, mot_de_passe_hash, statut)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'inactif')
+         RETURNING id`,
+        [lignes[0].nom, demande.siret, demande.adresse, demande.code_postal, demande.ville, palier.id, demande.mot_de_passe_hash]
+      );
+      ecoleId = ecoleRows[0].id;
+      lignes[0].ecoleId = ecoleId;
+      clientContrat = {
+        name: lignes[0].nom,
+        legalForm: "Établissement d'enseignement",
+        address: `${demande.adresse}, ${String(demande.code_postal).trim()} ${demande.ville}`,
+        siret: String(demande.siret).trim(),
+        billingContact: `${demande.prenom_contact} ${demande.nom_contact}`,
+      };
+    } else {
+      // Pas de connexion au niveau du groupe ni de l'école : ces hash ne servent jamais, mais les colonnes sont NOT NULL.
+      const hashInutilise = demande.mot_de_passe_hash || await bcrypt.hash(generateTempPassword(), 12);
+      const { rows: groupeRows } = await client.query(
+        `INSERT INTO groupe_scolaire
+           (nom_du_siege, nom_DAF, prenom_DAF, type_licence_id, mot_de_passe_hash, statut)
+         VALUES ($1, $2, $3, $4, $5, 'inactif')
+         RETURNING id`,
+        [demande.nom_siege_ou_ecole, demande.nom_daf, demande.prenom_daf, palier.id, hashInutilise]
+      );
+      groupeId = groupeRows[0].id;
+      for (const [i, e] of etablissementsDemande.entries()) {
         const { rows: ecoleRows } = await client.query(
           `INSERT INTO ecole
-             (nom_complet_ecole, siret, adresse, code_postal, ville, type_licence_id, mot_de_passe_hash, statut)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'actif')
+             (groupe_scolaire_id, nom_complet_ecole, siret, adresse, code_postal, ville,
+              type_licence_id, mot_de_passe_hash, statut)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'inactif')
            RETURNING id`,
-          [
-            demande.nom_ecole || demande.nom_siege_ou_ecole, demande.siret, demande.adresse,
-            demande.code_postal, demande.ville, demande.type_licence_id, demande.mot_de_passe_hash,
-          ]
+          [groupeId, e.nom, e.siret, e.adresse, e.code_postal, e.ville, palier.id, hashInutilise]
         );
-        await client.query(
-          `INSERT INTO utilisateur
-             (ecole_id, nom, prenom, email, mot_de_passe_hash, mdp_temporaire, role, statut)
-           VALUES ($1, $2, $3, $4, $5, FALSE, 'admin', 'actif')`,
-          [ecoleRows[0].id, demande.nom_contact, demande.prenom_contact, demande.email, demande.mot_de_passe_hash]
-        );
-      } else {
-        // Pas de connexion au niveau du groupe : le hash n'est jamais utilisé, mais la colonne est NOT NULL.
-        const groupeHash = demande.mot_de_passe_hash || await bcrypt.hash(generateTempPassword(), 12);
-        const { rows: groupeRows } = await client.query(
-          `INSERT INTO groupe_scolaire
-             (nom_du_siege, nom_DAF, prenom_DAF, type_licence_id, mot_de_passe_hash, statut)
-           VALUES ($1, $2, $3, $4, $5, 'actif')
-           RETURNING id`,
-          [demande.nom_siege_ou_ecole, demande.nom_daf, demande.prenom_daf, demande.type_licence_id, groupeHash]
-        );
-
-        // Un établissement + un compte admin (mot de passe à définir) par responsable.
-        for (const e of etablissements) {
-          const placeholderHash = await bcrypt.hash(generateTempPassword(), 12);
-          const { rows: ecoleRows } = await client.query(
-            `INSERT INTO ecole
-               (groupe_scolaire_id, nom_complet_ecole, siret, adresse, code_postal, ville,
-                type_licence_id, mot_de_passe_hash, statut)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'actif')
-             RETURNING id`,
-            [groupeRows[0].id, e.nom, e.siret, e.adresse, e.code_postal, e.ville, demande.type_licence_id, placeholderHash]
-          );
-          const userId = randomUUID();
-          await client.query(
-            `INSERT INTO utilisateur
-               (id, ecole_id, nom, prenom, email, mot_de_passe_hash, mdp_temporaire, role, statut)
-             VALUES ($1, $2, $3, $4, $5, $6, TRUE, 'admin', 'actif')`,
-            [userId, ecoleRows[0].id, e.nom_responsable, e.prenom_responsable, e.email_responsable, placeholderHash]
-          );
-          invitations.push({ ...e, userId, ecoleId: ecoleRows[0].id });
-        }
+        lignes[i].ecoleId = ecoleRows[0].id;
       }
+      clientContrat = {
+        name: demande.nom_siege_ou_ecole,
+        legalForm: 'Groupe scolaire',
+        // Le formulaire de groupe ne demande pas l'adresse du siège
+        address: '',
+        siret: null,
+        billingContact: `${demande.prenom_contact || demande.prenom_daf} ${demande.nom_contact || demande.nom_daf}`,
+      };
     }
+
+    const contrat = await contrats.creerContratBrouillon(client, {
+      demande,
+      ecoleId,
+      groupeId,
+      client: clientContrat,
+      etablissements: lignes,
+      palier,
+      creePar: req.auth.userId,
+      acteur: await contrats.acteurCubi(client, req.auth.userId),
+    });
 
     await client.query('COMMIT');
 
-    if (statut === 'validee') {
-      try {
-        await sendDemandeAcceptedEmail(
-          demande.email, demande.prenom_contact || demande.prenom_daf, demande.type_demande, invitations.length
-        );
-      } catch (e) {
-        console.warn(`Échec envoi email d'acceptation pour ${demande.email} : ${e.message}`);
-      }
-      for (const inv of invitations) {
-        try {
-          const token = generateTempJwt({ id: inv.userId, ecole_id: inv.ecoleId, role: 'admin' }, 'ecole');
-          await sendWelcomeEmail(inv.email_responsable, inv.prenom_responsable, token, config.frontendUrl);
-        } catch (e) {
-          console.warn(`Échec envoi invitation pour ${inv.email_responsable} : ${e.message}`);
-        }
-      }
-    }
-
-    console.log(`Demande ${req.params.id} ${statut} par ${req.auth.userId}`);
+    console.log(`Demande ${req.params.id} validee par ${req.auth.userId} : contrat ${contrat.numero} en brouillon`);
     res.json({
-      message: statut === 'refusee' ? 'Demande refusée'
-        : invitations.length ? `Demande validée : ${invitations.length} établissements créés, invitations envoyées`
-        : 'Demande validée, compte créé',
+      message: `Demande validée : contrat ${contrat.numero} créé en brouillon. Complète le signataire puis envoie-le pour signature.`,
+      contrat: { id: contrat.id, numero: contrat.numero },
     });
   } catch (err) {
     await client.query('ROLLBACK');
+    if (err.status === 422) return res.status(422).json({ message: err.message });
     // SIRET ou email pris entre la demande et sa validation (contraintes UNIQUE)
     if (err.code === '23505') {
       return res.status(422).json({
@@ -588,9 +690,13 @@ router.delete('/sessions/:id', requireCubi('super_admin'), async (req, res, next
   } catch (err) { next(err); }
 });
 
-// ── Factures (stub) ───────────────────────────────────────────────────────────
+// ── Contrats (routes/adminContrats.js) ──────────────────────────────────────
 
-router.get('/factures', (req, res) => res.json([]));
+router.use('/contrats', require('./adminContrats'));
+
+// ── Factures (routes/adminFactures.js) ───────────────────────────────────────
+
+router.use('/factures', require('./adminFactures'));
 
 // ── Journaux ──────────────────────────────────────────────────────────────────
 
@@ -860,56 +966,6 @@ function generateTempPassword() {
     pwd += charset[Math.floor(Math.random() * charset.length)];
   }
   return pwd;
-}
-
-async function sendDemandeAcceptedEmail(email, prenom, typeDemande, nbEtablissements = 0) {
-  const loginUrl = `${config.frontendUrl}/login`;
-  const textContent = typeDemande === 'ecole'
-    ? `Bonjour ${prenom},\n\nBonne nouvelle : votre demande d'inscription a été validée par notre équipe.\n\nVous pouvez dès maintenant vous connecter avec l'email et le mot de passe que vous avez choisis lors de votre inscription :\n${loginUrl}\n\nL'équipe CUBI`
-    : nbEtablissements > 0
-      ? `Bonjour ${prenom},\n\nBonne nouvelle : la demande d'inscription de votre groupe a été validée par notre équipe.\n\nLes ${nbEtablissements} établissements ont été créés. Chaque responsable d'établissement a reçu un email pour définir son mot de passe et accéder à son espace CUBI.\n\nL'équipe CUBI`
-      : `Bonjour ${prenom},\n\nBonne nouvelle : la demande d'inscription de votre groupe scolaire a été validée par notre équipe.\n\nNotre équipe revient vers vous prochainement pour la suite.\n\nL'équipe CUBI`;
-
-  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
-    method: 'POST',
-    headers: {
-      'api-key': config.brevoApiKey,
-      accept: 'application/json',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      sender: { name: 'Cubi', email: config.emailFrom },
-      to: [{ email, name: prenom }],
-      subject: 'Votre demande d\'inscription CUBI a été acceptée',
-      textContent,
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Brevo API ${res.status}: ${body}`);
-  }
-}
-
-async function sendWelcomeEmail(email, prenom, tokenReset, frontendUrl) {
-  const resetLink = `${frontendUrl}/reset-password?token=${tokenReset}`;
-  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
-    method: 'POST',
-    headers: {
-      'api-key': config.brevoApiKey,
-      accept: 'application/json',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      sender: { name: 'Cubi', email: config.emailFrom },
-      to: [{ email, name: prenom }],
-      subject: 'Bienvenue sur Cubi - Vos identifiants',
-      textContent: `Bonjour ${prenom},\n\nVotre compte CUBI a été créé par un administrateur.\n\nDéfinissez votre mot de passe en cliquant sur ce lien :\n${resetLink}\n\nCe lien est valable 48h.\n\nL'équipe CUBI`,
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Brevo API ${res.status}: ${body}`);
-  }
 }
 
 module.exports = router;
