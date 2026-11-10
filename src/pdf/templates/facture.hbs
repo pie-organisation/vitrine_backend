@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8"><title>Facture {{invoice.number}} — CUBI</title>
+<style>{{{fontFaces}}}</style>
+<style>{{{css}}}</style>
+<style>
+@page{size:A4;margin:14mm 16mm 14mm}
+body{display:flex;flex-direction:column;min-height:269mm}
+.totals-wrap{display:grid;grid-template-columns:1fr 72mm;gap:8mm;margin-top:6mm;align-items:start}
+.pay{border:1px solid var(--line);border-radius:10px;padding:4.5mm 5mm;font-size:8.6pt;color:var(--ink-2)}
+.pay .row{display:flex;gap:3mm;padding:1px 0}
+.pay .k{min-width:22mm;color:var(--ink-3)}
+.pay .k+span{font-weight:500;color:var(--ink)}
+.totals{border-radius:10px;overflow:hidden;border:1px solid var(--line)}
+.totals .l{display:flex;justify-content:space-between;padding:2.6mm 4mm;border-bottom:1px solid var(--line);font-size:9pt}
+.totals .l span:first-child{color:var(--ink-2)}
+.totals .ttc{background:var(--g-main);color:#fff;border:0;padding:4mm}
+.totals .ttc span:first-child{color:rgba(255,255,255,.85);font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:7.5pt;align-self:center}
+.totals .ttc span:last-child{font-family:var(--fd);font-weight:800;font-size:15pt;letter-spacing:-.5px}
+.note{margin-top:7mm;background:var(--tint);border-radius:10px;padding:4mm 5mm;font-size:8.6pt;color:var(--ink-2)}
+.paid{display:inline-block;margin-top:6px}
+.spacer{flex:1}
+</style></head>
+<body>
+
+<header class="head">
+  <div class="brand"><div class="mark">C</div><div><div class="word">CUBI</div><div class="tagline">Cloud souverain</div></div></div>
+  <div class="doc-id">
+    <div class="doc-type">{{#if invoice.isCreditNote}}Avoir{{else}}Facture{{/if}}</div>
+    <div class="doc-num">N° <b>{{invoice.number}}</b></div>
+    {{#if invoice.paidAt}}<span class="badge green paid">Payée le {{date invoice.paidAt}}</span>{{/if}}
+  </div>
+</header>
+
+<section class="parties">
+  <div class="party">
+    <div class="eyebrow">Émetteur</div>
+    <div class="name">{{issuer.legalName}}</div>
+    <p>{{issuer.address}}<br>SIRET {{issuer.siret}} · {{issuer.rcs}}<br>TVA intracom. {{issuer.vatNumber}}<br>{{issuer.billingEmail}}</p>
+  </div>
+  <div class="party client">
+    <div class="eyebrow">Facturé à</div>
+    <div class="name">{{client.name}}</div>
+    <p>{{#if client.billingContact}}{{client.billingContact}}<br>{{/if}}{{client.address}}{{#if client.siret}}<br>SIRET {{client.siret}}{{/if}}{{#if client.purchaseOrder}}<br>N° engagement : {{client.purchaseOrder}}{{/if}}</p>
+  </div>
+</section>
+
+<section class="meta">
+  <div><div class="eyebrow">Date d'émission</div><div class="v">{{date invoice.issuedAt}}</div></div>
+  <div><div class="eyebrow">Échéance</div><div class="v">{{date invoice.dueAt}}</div></div>
+  <div><div class="eyebrow">Période</div><div class="v">{{invoice.periodLabel}}</div></div>
+  <div><div class="eyebrow">{{#if invoice.isCreditNote}}Facture d'origine{{else}}Contrat{{/if}}</div><div class="v">{{#if invoice.isCreditNote}}{{invoice.originalInvoiceNumber}}{{else}}{{invoice.contractNumber}}{{/if}}</div></div>
+</section>
+
+<table>
+  <thead><tr><th style="width:50%">Désignation</th><th class="r">Qté</th><th class="r">PU HT</th><th class="r">TVA</th><th class="r">Total HT</th></tr></thead>
+  <tbody>
+    {{#each lines}}
+    <tr><td class="item">{{label}}{{#if description}}<small>{{description}}</small>{{/if}}</td><td class="r">{{quantity}}</td><td class="r">{{money unitPriceCents}}</td><td class="r">{{vatRate}} %</td><td class="r">{{money totalHtCents}}</td></tr>
+    {{/each}}
+  </tbody>
+</table>
+
+<section class="totals-wrap">
+  {{#if invoice.isCreditNote}}
+  <div class="pay">Montant porté au crédit du client, imputé sur les prochaines factures ou remboursé sur demande.</div>
+  {{else}}
+  <div class="pay">
+    <div class="eyebrow">Règlement par virement</div>
+    <div class="row"><span class="k">Titulaire</span><span>{{issuer.legalName}}</span></div>
+    <div class="row"><span class="k">IBAN</span><span>{{issuer.iban}}</span></div>
+    <div class="row"><span class="k">BIC</span><span>{{issuer.bic}}</span></div>
+    <div class="row"><span class="k">Référence</span><span>{{invoice.number}}</span></div>
+  </div>
+  {{/if}}
+  <div class="totals">
+    <div class="l"><span>Total HT</span><span>{{money invoice.totalHtCents}}</span></div>
+    {{#each invoice.vatBreakdown}}<div class="l"><span>TVA {{rate}} %</span><span>{{money amountCents}}</span></div>{{/each}}
+    <div class="l ttc"><span>Total TTC</span><span>{{money invoice.totalTtcCents}}</span></div>
+  </div>
+</section>
+
+<div class="note">Merci pour votre confiance. Vos postes sont hébergés exclusivement en France <span class="badge">RGPD</span> <span class="badge green">Datacenter France</span></div>
+
+<div class="spacer"></div>
+
+<footer class="legal">
+  Paiement à {{issuer.paymentTermsDays}} jours à compter de la date d'émission. Pas d'escompte pour paiement anticipé.{{#unless invoice.isCreditNote}} En cas de retard, pénalités au taux de 3 fois le taux d'intérêt légal (art. L.441-10 C. com.) et indemnité forfaitaire pour frais de recouvrement de 40 € (art. D.441-5 C. com.).{{/unless}}<br>
+  {{issuer.legalName}} — {{issuer.legalForm}} au capital de {{issuer.capital}} · {{issuer.address}} · SIRET {{issuer.siret}} · TVA {{issuer.vatNumber}}
+</footer>
+</body></html>

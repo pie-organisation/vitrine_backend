@@ -1,2 +1,5 @@
 .env
 node_modules/
+schema_neon.sql
+.cache/
+tmp-preview/

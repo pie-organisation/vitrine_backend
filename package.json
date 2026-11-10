@@ -5,19 +5,29 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
+    "dev": "nodemon src/index.js",
+    "test": "node --test test/",
+    "pdf:preview": "node scripts/pdf-preview.js",
+    "migration:verifier": "node scripts/generer-verifier-migration.js"
   },
   "dependencies": {
+    "@fontsource/plus-jakarta-sans": "^5.3.0",
+    "@fontsource/space-grotesk": "^5.3.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "express-rate-limit": "^8",
+    "handlebars": "^4.7.10",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.11.5",
-    "swagger-ui-express": "^5.0.1"
+    "puppeteer": "24.43.1",
+    "swagger-ui-express": "^5.0.1",
+    "zod": "^4"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0"
+    "nodemon": "^3.1.0",
+    "pdf-parse": "1.1.1"
   },
   "engines": {
     "node": "20.x"

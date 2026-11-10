@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8"><title>Contrat {{contract.number}} — CUBI</title>
+<style>{{{fontFaces}}}</style>
+<style>{{{css}}}</style>
+<style>
+@page{size:A4;margin:14mm 16mm 18mm;
+  @bottom-left{content:"{{cssText issuer.legalName}} · Contrat {{cssText contract.number}}{{#if signature.client}} · Signé électroniquement{{/if}}";font-family:'Space Grotesk';font-size:7pt;color:rgba(26,16,64,.45)}
+  @bottom-right{content:"Page " counter(page) " / " counter(pages);font-family:'Space Grotesk';font-size:7pt;color:rgba(26,16,64,.45)}
+}
+.intro{margin:7mm 0 5mm}
+.intro .title{font-family:var(--fd);font-weight:800;font-size:17pt;letter-spacing:-.6px;line-height:1.15}
+.intro .title span{color:var(--v1)}
+.intro p{color:var(--ink-2);margin-top:2mm;max-width:150mm}
+.cp{margin:6mm 0 2mm}
+.cp td:first-child{color:var(--ink-3);width:56mm;white-space:nowrap}
+.cp td:last-child{font-weight:500}
+.art{margin-top:5.5mm;break-inside:avoid}
+.art h3{font-family:var(--fd);font-weight:700;font-size:10pt;margin-bottom:1.5mm;display:flex;gap:3mm;align-items:baseline}
+.art h3 .n{font-size:7pt;font-weight:800;letter-spacing:.1em;color:var(--v1);background:var(--tint);border-radius:6px;padding:1px 6px}
+.art p,.art li{color:var(--ink-2);font-size:9pt;text-align:justify}
+.art p+p{margin-top:1.5mm}
+.art ul{margin:1.5mm 0 0 5mm}
+.art li{margin-bottom:1mm}
+.sign{display:grid;grid-template-columns:1fr 1fr;gap:6mm;margin-top:8mm;break-inside:avoid}
+.sign .box{border:1px solid var(--line);border-radius:10px;padding:4.5mm 5mm;min-height:52mm;display:flex;flex-direction:column}
+.sign .box.client{background:var(--tint);border-color:transparent}
+.sign .who{font-family:var(--fd);font-weight:700;font-size:10pt}
+.sign .line{font-size:8.5pt;color:var(--ink-3);margin-top:2mm}
+.sign .zone{margin-top:auto;border-top:1px dashed rgba(107,79,224,.35);padding-top:2mm;font-size:7.5pt;color:var(--ink-3)}
+.page-break{break-before:page}
+.sig-img{height:22mm;max-width:70mm;object-fit:contain;object-position:left;margin-top:2mm}
+.proof{break-before:page}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:7.5pt;word-break:break-all}
+</style></head>
+<body>
+
+<header class="head">
+  <div class="brand"><div class="mark">C</div><div><div class="word">CUBI</div><div class="tagline">Cloud souverain</div></div></div>
+  <div class="doc-id">
+    <div class="doc-type">Contrat</div>
+    <div class="doc-num">N° <b>{{contract.number}}</b></div>
+    {{#if signature.client}}<span class="badge green" style="margin-top:6px;display:inline-block">Signé le {{date signature.client.signedAt}}</span>{{else}}<span class="badge" style="margin-top:6px;display:inline-block">En attente de signature</span>{{/if}}
+  </div>
+</header>
+
+<section class="intro">
+  <div class="eyebrow">Contrat d'abonnement</div>
+  <div class="title">Accès au poste de travail cloud <span>{{contract.offerName}}</span></div>
+  <p>Le présent contrat est composé des Conditions particulières ci-dessous et des Conditions générales qui suivent. En cas de contradiction, les Conditions particulières prévalent.</p>
+</section>
+
+<section class="parties" style="margin-top:0">
+  <div class="party">
+    <div class="eyebrow">Le prestataire</div>
+    <div class="name">{{issuer.legalName}}</div>
+    <p>{{issuer.legalForm}} au capital de {{issuer.capital}}<br>{{issuer.address}}<br>SIRET {{issuer.siret}}<br>Représentée par {{issuer.signatoryName}}, {{issuer.signatoryRole}}</p>
+  </div>
+  <div class="party client">
+    <div class="eyebrow">Le client</div>
+    <div class="name">{{client.name}}</div>
+    <p>{{client.legalForm}}<br>{{client.address}}{{#if client.siret}}<br>SIRET {{client.siret}}{{/if}}<br>Représenté par {{signer.fullName}}, {{signer.role}}</p>
+  </div>
+</section>
+
+<div class="eyebrow">Conditions particulières</div>
+<table class="cp">
+  <tbody>
+    <tr><td>Offre souscrite</td><td>{{contract.offerName}}{{#if contract.offerBadge}} <span class="badge">{{contract.offerBadge}}</span>{{/if}}</td></tr>
+    {{#each contract.lines}}
+    <tr><td>{{label}}</td><td>{{detail}}</td></tr>
+    {{/each}}
+    <tr><td>Durée</td><td>{{contract.durationMonths}} mois à compter du {{date contract.startDate}}, renouvelable tacitement</td></tr>
+    <tr><td>Facturation</td><td>{{contract.billingLabel}} · paiement à {{issuer.paymentTermsDays}} jours par virement</td></tr>
+    <tr><td>Hébergement</td><td>Datacenters situés en France métropolitaine <span class="badge green">RGPD</span></td></tr>
+  </tbody>
+</table>
+
+<div class="art"><h3><span class="n">ART. 1</span>Objet</h3>
+<p>Le présent contrat a pour objet de définir les conditions dans lesquelles CUBI met à disposition du Client un service de poste de travail Windows hébergé (Desktop-as-a-Service), accessible à distance depuis tout appareil compatible au moyen du client léger CUBI ou d'un navigateur web.</p></div>
+
+<div class="art"><h3><span class="n">ART. 2</span>Description du service</h3>
+<p>Chaque licence ouvre droit, pour un utilisateur nommé, à :</p>
+<ul>
+  <li>une session de poste de travail virtuel dont les ressources (CPU, mémoire, stockage) correspondent à l'offre souscrite ;</li>
+  <li>un espace de stockage personnel persistant entre les sessions ;</li>
+  <li>pour les licences Enseignant, l'accès à la console de classe (supervision, partage d'écran, gestion des sessions).</li>
+</ul>
+<p>Le Client administre ses utilisateurs depuis l'espace établissement. Les comptes étudiants sont créés par l'administrateur du Client ; aucune inscription libre n'est possible.</p></div>
+
+<div class="art"><h3><span class="n">ART. 3</span>Niveau de service</h3>
+<p>CUBI s'engage sur une disponibilité mensuelle du service de 99 %, hors maintenances planifiées notifiées au moins 72 heures à l'avance et réalisées en dehors des heures scolaires lorsque cela est possible. En cas de non-respect, le Client bénéficie d'un avoir de 5 % de la redevance mensuelle par tranche de 1 % d'indisponibilité, plafonné à 30 %.</p></div>
+
+<div class="art"><h3><span class="n">ART. 4</span>Prix et modalités de paiement</h3>
+<p>Les prix sont indiqués en euros hors taxes dans les Conditions particulières et majorés de la TVA au taux en vigueur. Les factures sont payables à 30 jours à compter de leur date d'émission. Tout retard entraîne de plein droit des pénalités au taux de trois fois le taux d'intérêt légal ainsi qu'une indemnité forfaitaire de 40 € pour frais de recouvrement.</p>
+<p>Le nombre de licences peut être augmenté à tout moment ; l'ajout est facturé au prorata de la période en cours.</p></div>
+
+<div class="art"><h3><span class="n">ART. 5</span>Données personnelles et souveraineté</h3>
+<p>CUBI agit en qualité de sous-traitant au sens de l'article 28 du RGPD pour les données des utilisateurs du Client. L'ensemble des données est hébergé et traité exclusivement en France, par des prestataires non soumis à une législation extraterritoriale permettant un accès par une autorité étrangère. Un accord de traitement des données (DPA) est annexé au présent contrat.</p>
+<p>En fin de contrat, les données du Client lui sont restituées sur demande dans un délai de 30 jours, puis supprimées de manière définitive.</p></div>
+
+<div class="art"><h3><span class="n">ART. 6</span>Obligations du client</h3>
+<p>Le Client s'engage à utiliser le service conformément à sa destination pédagogique, à veiller au respect de la charte d'usage par ses utilisateurs, à préserver la confidentialité des identifiants et à informer CUBI sans délai de toute utilisation frauduleuse constatée.</p></div>
+
+<div class="art"><h3><span class="n">ART. 7</span>Durée et résiliation</h3>
+<p>Le contrat prend effet à la date indiquée aux Conditions particulières pour la durée stipulée. Il se renouvelle tacitement par périodes de 12 mois, sauf dénonciation par l'une des parties par lettre recommandée avec accusé de réception au moins 60 jours avant l'échéance.</p>
+<p>En cas de manquement grave non corrigé dans les 30 jours suivant une mise en demeure, la partie lésée peut résilier le contrat de plein droit.</p></div>
+
+<div class="art"><h3><span class="n">ART. 8</span>Responsabilité</h3>
+<p>La responsabilité de CUBI est limitée aux dommages directs et prouvés, dans la limite des sommes versées par le Client au cours des 12 derniers mois. CUBI ne saurait être tenue responsable des contenus installés ou produits par les utilisateurs sur leur poste virtuel.</p></div>
+
+<div class="art"><h3><span class="n">ART. 9</span>Droit applicable et litiges</h3>
+<p>Le présent contrat est soumis au droit français. Les parties rechercheront une solution amiable à tout différend ; à défaut, compétence est attribuée aux juridictions du ressort de la Cour d'appel de Paris.</p></div>
+
+<section class="sign">
+  <div class="box">
+    <div class="eyebrow">Pour {{issuer.legalName}}</div>
+    <div class="who">{{issuer.signatoryName}}</div>
+    <div class="line">{{issuer.signatoryRole}}</div>
+    {{#if signature.issuer}}
+      <img class="sig-img" src="{{signature.issuer.imageDataUrl}}" alt="">
+      <div class="zone">Lu et approuvé — signé électroniquement le {{datetime signature.issuer.signedAt}}</div>
+    {{else}}
+      <div class="zone">En attente de contre-signature</div>
+    {{/if}}
+  </div>
+  <div class="box client">
+    <div class="eyebrow">Pour le Client</div>
+    <div class="who">{{signer.fullName}}</div>
+    <div class="line">{{signer.role}} — {{client.name}}</div>
+    {{#if signature.client}}
+      <img class="sig-img" src="{{signature.client.imageDataUrl}}" alt="">
+      <div class="zone">« {{signature.client.mention}} » — signé électroniquement le {{datetime signature.client.signedAt}}<br>Réf. preuve : {{signature.client.proofId}}</div>
+    {{else}}
+      <div class="zone">Signature électronique en attente</div>
+    {{/if}}
+  </div>
+</section>
+
+{{#if proof}}
+<section class="proof">
+  <div class="eyebrow">Annexe</div>
+  <h2>Certificat de signature électronique</h2>
+  <p class="muted" style="margin-bottom:4mm">Signature électronique simple au sens du règlement eIDAS (UE) n° 910/2014, art. 25. Ce certificat fait partie intégrante du document.</p>
+  <table class="cp">
+    <tbody>
+      <tr><td>Document</td><td>Contrat {{contract.number}}</td></tr>
+      <tr><td>Empreinte avant signature</td><td class="mono">SHA-256 {{proof.originalHash}}</td></tr>
+      <tr><td>Signataire</td><td>{{signer.fullName}} · {{signer.email}}</td></tr>
+      <tr><td>Authentification</td><td>Lien unique par e-mail + code à usage unique (OTP)</td></tr>
+    </tbody>
+  </table>
+  <table style="margin-top:5mm">
+    <thead><tr><th>Horodatage (UTC)</th><th>Événement</th><th>Acteur</th><th>IP</th></tr></thead>
+    <tbody>
+      {{#each proof.events}}
+      <tr><td class="mono">{{iso at}}</td><td>{{label}}</td><td>{{actor}}</td><td class="mono">{{ip}}</td></tr>
+      {{/each}}
+    </tbody>
+  </table>
+  <p class="legal" style="margin-top:6mm">L'empreinte du PDF final signé est conservée côté serveur et n'est pas imprimée dans le document (elle dépend de son contenu). Elle peut être vérifiée via {{proof.verifyUrl}}.</p>
+</section>
+{{/if}}
+</body></html>

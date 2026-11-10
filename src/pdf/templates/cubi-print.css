@@ -1,0 +1,61 @@
+/* Les @font-face (Plus Jakarta Sans / Space Grotesk) sont injectés en base64 par le renderer */
+
+:root{
+  --v1:#6B4FE0;--v2:#8B6FF0;--m1:#C084FC;--p1:#E879F9;
+  --ink:#1a1040;--ink-2:rgba(26,16,64,.68);--ink-3:rgba(26,16,64,.48);
+  --line:rgba(107,79,224,.16);--tint:#F6F1FF;
+  --g-main:linear-gradient(135deg,#6B4FE0 0%,#C084FC 55%,#E879F9 100%);
+  --fd:'Plus Jakarta Sans',sans-serif;--fb:'Space Grotesk',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{font-family:var(--fb);font-size:9.5pt;color:var(--ink);line-height:1.5;background:#fff}
+
+/* bandeau gradient fin en haut de chaque page */
+.topline{display:none}
+
+/* ── En-tête ── */
+.head{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:7mm;position:relative}
+.head::after{content:'';position:absolute;left:0;right:0;bottom:0;height:2px;border-radius:2px;background:var(--g-main)}
+.brand{display:flex;align-items:center;gap:10px}
+.mark{width:34px;height:34px;border-radius:9px;background:var(--g-main);color:#fff;font-family:var(--fd);font-weight:800;font-size:16px;display:flex;align-items:center;justify-content:center}
+.word{font-family:var(--fd);font-weight:800;font-size:19px;letter-spacing:-.5px;color:var(--v1)}
+.tagline{font-size:7pt;letter-spacing:.14em;text-transform:uppercase;color:var(--v2);font-weight:600;margin-top:1px}
+.doc-id{text-align:right}
+.doc-type{font-family:var(--fd);font-weight:800;font-size:22pt;letter-spacing:-1px;line-height:1}
+.doc-num{font-size:9pt;color:var(--ink-3);margin-top:4px}
+.doc-num b{color:var(--v1);font-weight:600}
+
+/* ── Libellés ── */
+.eyebrow{font-size:6.8pt;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--v2);margin-bottom:5px}
+.muted{color:var(--ink-3)}
+h2{font-family:var(--fd);font-weight:800;font-size:12pt;letter-spacing:-.3px;margin-bottom:3mm}
+
+/* ── Blocs parties ── */
+.parties{display:grid;grid-template-columns:1fr 1fr;gap:6mm;margin:7mm 0}
+.party{border:1px solid var(--line);border-radius:10px;padding:4.5mm 5mm}
+.party.client{background:var(--tint);border-color:transparent}
+.party .name{font-family:var(--fd);font-weight:700;font-size:11pt;margin-bottom:2px}
+.party p{font-size:8.8pt;color:var(--ink-2);line-height:1.55}
+
+/* ── Méta (dates etc) ── */
+.meta{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:7mm}
+.meta>div{padding:3.2mm 4mm;border-right:1px solid var(--line)}
+.meta>div:last-child{border-right:0}
+.meta .v{font-family:var(--fd);font-weight:700;font-size:9.5pt}
+
+/* ── Tableau ── */
+table{width:100%;border-collapse:collapse}
+thead th{font-size:6.8pt;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--v1);text-align:left;padding:2.6mm 3mm;background:var(--tint)}
+thead th:first-child{border-radius:8px 0 0 8px}
+thead th:last-child{border-radius:0 8px 8px 0}
+tbody td{padding:3.2mm 3mm;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+.r{text-align:right;white-space:nowrap}
+.item{font-weight:600}
+.item small{display:block;font-weight:400;color:var(--ink-3);font-size:8pt;margin-top:1px}
+
+/* ── Footer légal ── */
+.legal{font-size:7pt;color:var(--ink-3);line-height:1.55;border-top:1px solid var(--line);padding-top:3.5mm}
+.badge{display:inline-block;border-radius:100px;padding:1px 8px;font-size:7pt;font-weight:600;background:rgba(107,79,224,.1);color:var(--v1);border:1px solid rgba(107,79,224,.2)}
+.badge.green{background:rgba(34,197,94,.1);color:#15803d;border-color:rgba(34,197,94,.25)}

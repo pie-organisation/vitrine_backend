@@ -2,8 +2,53 @@ services:
   - type: web
     name: vitrine-backend
     runtime: node
-    buildCommand: yarn install --frozen-lockfile
+    # Chromium (chrome-headless-shell) est téléchargé dans .cache/puppeteer (voir .puppeteerrc.cjs),
+    # dossier conservé entre le build et l'exécution
+    buildCommand: yarn install --frozen-lockfile && npx puppeteer browsers install chrome-headless-shell
     startCommand: yarn start
     envVars:
       - key: NODE_ENV
         value: production
+      # Valeurs à saisir dans le dashboard Render (sync: false = jamais stockées dans le dépôt)
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: FRONT_URL
+        sync: false
+      - key: JOB_SECRET
+        sync: false
+      - key: FRAIS_MISE_EN_SERVICE_CENTIMES
+        value: "0"
+      - key: CUBI_RAISON_SOCIALE
+        sync: false
+      - key: CUBI_FORME_JURIDIQUE
+        sync: false
+      - key: CUBI_CAPITAL
+        sync: false
+      - key: CUBI_ADRESSE
+        sync: false
+      - key: CUBI_SIRET
+        sync: false
+      - key: CUBI_RCS
+        sync: false
+      - key: CUBI_TVA_INTRACOM
+        sync: false
+      - key: CUBI_EMAIL_FACTURATION
+        sync: false
+      - key: CUBI_IBAN
+        sync: false
+      - key: CUBI_BIC
+        sync: false
+      - key: CUBI_DELAI_PAIEMENT_JOURS
+        value: "30"
+      - key: CUBI_SIGNATAIRE_NOM
+        sync: false
+      - key: CUBI_SIGNATAIRE_FONCTION
+        sync: false
+      - key: CUBI_SIGNATURE_PNG_BASE64
+        sync: false

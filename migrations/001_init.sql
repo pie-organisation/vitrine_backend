@@ -107,7 +107,7 @@ CREATE TABLE demande_inscription (
     prenom_DAF         VARCHAR(100),           -- groupe seulement
     siret              CHAR(14),               -- ecole seulement
     type_licence_id    UUID         NOT NULL,
-    statut             VARCHAR(20)  NOT NULL   CHECK (statut IN ('en_attente', 'validee', 'rejetee')),
+    statut             VARCHAR(20)  NOT NULL   CHECK (statut IN ('en_attente', 'validee', 'refusee')),
     date_demande       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     date_traitement    TIMESTAMPTZ,
 
