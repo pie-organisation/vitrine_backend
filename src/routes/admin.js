@@ -190,7 +190,8 @@ function serializeOrgSummary(r) {
     type: r.type,
     ville: r.ville || '—',
     siret: r.siret || '—',
-    statut: r.statut === 'actif' ? 'actif' : 'suspendu',
+    // 'inactif' = contrat pas encore signé, distinct d'une suspension
+    statut: ['actif', 'inactif'].includes(r.statut) ? r.statut : 'suspendu',
     plan: r.plan,
     nbUtilisateurs: Number(r.nb_utilisateurs) || 0,
     dateDebut: r.date_debut
@@ -335,6 +336,71 @@ router.post('/organisations/:id/suspendre', requireCubi('super_admin'), async (r
     await client.query('COMMIT');
     console.log(`Organisation ${req.params.id} suspendue par ${req.auth.userId}`);
     res.json({ message: 'Organisation suspendue' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+// Inverse de la suspension : 'suspendu' -> 'actif', seulement s'il existe un contrat signé
+// (pas de contrat signé = pas d'organisation active). Une organisation 'inactif' attend sa
+// signature : elle s'active par le contrat, pas ici. La facturation reprend au mois en cours.
+router.post('/organisations/:id/reactiver', requireCubi('super_admin'), async (req, res, next) => {
+  if (!messagerie.isUuid(req.params.id)) {
+    return res.status(404).json({ error: 'Organisation introuvable' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const refuser = async (status, error) => {
+      await client.query('ROLLBACK');
+      return res.status(status).json({ error });
+    };
+
+    const { rows: [ecole] } = await client.query(
+      `SELECT e.id, e.statut, e.groupe_scolaire_id, g.statut AS statut_groupe
+       FROM ecole e LEFT JOIN groupe_scolaire g ON g.id = e.groupe_scolaire_id
+       WHERE e.id = $1 FOR UPDATE OF e`,
+      [req.params.id]
+    );
+    const { rows: [groupe] } = ecole ? { rows: [] } : await client.query(
+      'SELECT id, statut FROM groupe_scolaire WHERE id = $1 FOR UPDATE', [req.params.id]
+    );
+    const org = ecole || groupe;
+    if (!org) return refuser(404, 'Organisation introuvable');
+    if (org.statut === 'actif') return refuser(409, 'Cette organisation est déjà active.');
+    if (org.statut !== 'suspendu') {
+      return refuser(409, "Cette organisation n'a pas encore signé son contrat : elle sera activée à la signature.");
+    }
+    if (ecole?.groupe_scolaire_id && ecole.statut_groupe !== 'actif') {
+      return refuser(409, "Le groupe de cet établissement est suspendu : réactive d'abord le groupe.");
+    }
+
+    const { rows: signes } = await client.query(
+      `SELECT 1 FROM contrat WHERE statut = 'signe'
+         AND (ecole_id = $1 OR groupe_scolaire_id = $1 OR groupe_scolaire_id = $2) LIMIT 1`,
+      [req.params.id, ecole?.groupe_scolaire_id ?? null]
+    );
+    if (!signes.length) {
+      return refuser(409, 'Aucun contrat signé pour cette organisation : réactivation impossible.');
+    }
+
+    if (ecole) {
+      await client.query("UPDATE ecole SET statut = 'actif' WHERE id = $1", [ecole.id]);
+    } else {
+      await client.query(
+        "UPDATE groupe_scolaire SET statut = 'actif', date_modification = NOW() WHERE id = $1", [groupe.id]
+      );
+      // Seulement les établissements suspendus avec le groupe (pas ceux encore 'inactif')
+      await client.query(
+        "UPDATE ecole SET statut = 'actif' WHERE groupe_scolaire_id = $1 AND statut = 'suspendu'", [groupe.id]
+      );
+    }
+    await client.query('COMMIT');
+    console.log(`Organisation ${req.params.id} réactivée par ${req.auth.userId}`);
+    res.json({ message: 'Organisation réactivée' });
   } catch (err) {
     await client.query('ROLLBACK');
     next(err);
