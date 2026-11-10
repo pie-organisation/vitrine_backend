@@ -250,6 +250,7 @@ Le palier (`type_licence`) est **calculé** à partir de la quantité totale (po
 | POST | `/admin/contrats/:id/activer` | — | `{ message, dejaActive, invitations, conflits }`. Rejoue l'activation post-signature (idempotent) |
 | GET | `/admin/contrats/:id/pdf` | — | PDF inline : signé, sinon original, sinon aperçu non stocké (brouillon) |
 | POST | `/admin/organisations/:id/suspendre` | — | `{ message }` |
+| POST | `/admin/organisations/:id/reactiver` | — | `{ message }`. `suspendu` → `actif` (groupe : avec ses établissements suspendus). 409 si déjà active, si l'organisation attend encore sa signature (`inactif`), si son groupe est suspendu ou s'il n'existe aucun contrat signé |
 | DELETE | `/admin/organisations/:id` | — | 409 `{ error, action: 'suspendre' }` dès qu'un contrat ou une facture existe (pièces à conserver 10 ans) |
 
 `Contrat` : `{ id, numero, statut, organisation, type: 'ecole' | 'groupe', ecoleId, groupeId, offre, quantiteTotale, prixUnitaireCentimes, etablissements: [{ ecoleId, nom, siret, quantite, prixUnitaireCentimes }], dateDebut, dureeMois, signataire: { nom, fonction, email }, sha256Original, sha256Signe, dateSignatureCubi, dateSignatureClient, dateCreation, dateModification }`

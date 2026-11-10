@@ -99,6 +99,7 @@ test('un lien de réinitialisation (invitation) ne vaut pas session', async () =
     ['POST', `/admin/factures/${utilisateur.id}/payer`], ['POST', `/admin/contrats/${utilisateur.id}/envoyer`],
     ['PATCH', `/admin/contrats/${utilisateur.id}`], ['PATCH', `/admin/demandes/${utilisateur.id}`],
     ['POST', `/admin/organisations/${utilisateur.id}/suspendre`],
+    ['POST', `/admin/organisations/${utilisateur.id}/reactiver`],
   ]) {
     res = await fetch(base + chemin, { method, headers: { authorization: `Bearer ${lecture}`, 'content-type': 'application/json' }, body: '{}' });
     assert.equal(res.status, 403, `${method} ${chemin}`);
