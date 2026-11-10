@@ -22,7 +22,11 @@ const fontFaces = FONTS.flatMap(([famille, chemin, graisses]) => graisses.map(g 
   const b64 = fs.readFileSync(require.resolve(chemin.replace('%W', g))).toString('base64');
   return `@font-face{font-family:'${famille}';font-weight:${g};src:url(data:font/woff2;base64,${b64}) format('woff2')}`;
 })).join('\n');
-const css = fs.readFileSync(path.join(TPL_DIR, 'cubi-print.css'), 'utf8');
+// Logo Cubi embarqué en data URI (le réseau est bloqué pendant le rendu), ajouté au CSS
+// pour ne pas ouvrir de nouveau {{{ }}} dans les templates
+const logoB64 = fs.readFileSync(path.join(__dirname, 'assets', 'logo-cubi.png')).toString('base64');
+const css = fs.readFileSync(path.join(TPL_DIR, 'cubi-print.css'), 'utf8')
+  + `\n.mark.logo{background:url(data:image/png;base64,${logoB64}) center/contain no-repeat;border-radius:0}`;
 
 // ── Helpers Handlebars (instance isolée) ──────────────────────────────────────
 // {{ }} échappe le HTML. {{{ }}} est réservé à css et fontFaces.
