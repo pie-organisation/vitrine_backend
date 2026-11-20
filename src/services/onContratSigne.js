@@ -44,7 +44,7 @@ async function contactFacturation(client, { ecoleId, groupeId, nom, prenom, emai
 }
 
 async function onContratSigne(contratId) {
-  // Mot de passe aléatoire jamais communiqué : les responsables de groupe définissent le leur via l'invitation.
+  // Mot de passe aléatoire jamais communiqué : chaque admin créé définit le sien via l'invitation.
   // Haché hors transaction (bcrypt est lent) et partagé par les comptes créés dans cet appel.
   const hashProvisoire = await bcrypt.hash(crypto.randomBytes(24).toString('base64url'), 12);
 
@@ -89,12 +89,18 @@ async function onContratSigne(contratId) {
     const conflits = [];
     let comptesCrees = 0;
     if (demande.type_demande === 'ecole') {
-      // Le mot de passe choisi à l'inscription devient celui du compte admin
+      // Comme pour un groupe : mot de passe provisoire, le contact définit le sien via l'invitation
       const r = await creerCompteAdmin(client, {
         ecoleId: ecoleIds[0], nom: demande.nom_contact, prenom: demande.prenom_contact,
-        email: demande.email, hash: demande.mot_de_passe_hash, mdpTemporaire: false,
+        email: demande.email, hash: hashProvisoire, mdpTemporaire: true,
       });
-      if (r.cree) comptesCrees++;
+      if (r.cree) {
+        comptesCrees++;
+        invitations.push({
+          email_responsable: demande.email, prenom_responsable: demande.prenom_contact,
+          userId: r.userId, ecoleId: ecoleIds[0],
+        });
+      }
       if (r.conflit) conflits.push(demande.email);
     } else {
       const ecoleParSiret = new Map(donnees.etablissements.map(e => [e.siret, e.ecoleId]));

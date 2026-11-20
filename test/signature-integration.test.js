@@ -226,6 +226,10 @@ dbTest('parcours complet école : validation, envoi, OTP, signature, activation'
   const confirmation = dernierEmail(demande.email, /signé/);
   assert.equal(confirmation.attachments[0].content.subarray(0, 4).toString(), '%PDF');
   dernierEmail(demande.email, /connecter/);
+  // Pas de mot de passe à l'inscription : invitation à définir le sien, compte en mot de passe provisoire
+  dernierEmail(demande.email, /reset-password\?token=/);
+  const { rows: [admin] } = await pool.query('SELECT mdp_temporaire FROM utilisateur WHERE email = $1', [demande.email]);
+  assert.equal(admin.mdp_temporaire, true);
 
   r = await api('GET', `/signature/${token}`);
   assert.equal(r.body.statut, 'signe');

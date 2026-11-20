@@ -52,7 +52,7 @@ const fmtDate = d => new Date(d).toLocaleDateString('fr-FR', { timeZone: 'Europe
 async function sendDemandeAcceptedEmail(email, prenom, typeDemande, nbEtablissements = 0) {
   const loginUrl = `${config.frontendUrl}/login`;
   const textContent = typeDemande === 'ecole'
-    ? `Bonjour ${prenom},\n\nBonne nouvelle : votre demande d'inscription a été validée par notre équipe.\n\nVous pouvez dès maintenant vous connecter avec l'email et le mot de passe que vous avez choisis lors de votre inscription :\n${loginUrl}\n\nL'équipe CUBI`
+    ? `Bonjour ${prenom},\n\nBonne nouvelle : votre contrat est signé et votre espace CUBI est activé.\n\nVous allez recevoir un second e-mail avec un lien pour définir votre mot de passe. Vous pourrez ensuite vous connecter ici :\n${loginUrl}\n\nL'équipe CUBI`
     : nbEtablissements > 0
       ? `Bonjour ${prenom},\n\nBonne nouvelle : la demande d'inscription de votre groupe a été validée par notre équipe.\n\nLes ${nbEtablissements} établissements ont été créés. Chaque responsable d'établissement a reçu un email pour définir son mot de passe et accéder à son espace CUBI.\n\nL'équipe CUBI`
       : `Bonjour ${prenom},\n\nBonne nouvelle : la demande d'inscription de votre groupe scolaire a été validée par notre équipe.\n\nNotre équipe revient vers vous prochainement pour la suite.\n\nL'équipe CUBI`;
@@ -69,7 +69,7 @@ async function sendWelcomeEmail(email, prenom, tokenReset, frontendUrl) {
   await envoyerEmail({
     to: [{ email, name: prenom }],
     subject: 'Bienvenue sur Cubi - Vos identifiants',
-    text: `Bonjour ${prenom},\n\nVotre compte CUBI a été créé par un administrateur.\n\nDéfinissez votre mot de passe en cliquant sur ce lien :\n${resetLink}\n\nCe lien est valable 48h.\n\nL'équipe CUBI`,
+    text: `Bonjour ${prenom},\n\nVotre compte CUBI a été créé.\n\nDéfinissez votre mot de passe en cliquant sur ce lien :\n${resetLink}\n\nCe lien est valable 48h.\n\nL'équipe CUBI`,
   });
 }
 
