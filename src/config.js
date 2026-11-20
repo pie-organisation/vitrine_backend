@@ -26,4 +26,8 @@ module.exports = {
   fraisMiseEnServiceCentimes: Math.max(0, parseInt(process.env.FRAIS_MISE_EN_SERVICE_CENTIMES || '0', 10) || 0),
   // 'brevo' (défaut) ou 'memoire' (tests : les e-mails sont gardés en mémoire, rien n'est envoyé)
   emailTransport: process.env.EMAIL_TRANSPORT || 'brevo',
+  // Service « postes de travail » (API Go / Proxmox) : URL sans slash final et secret de chiffrement
+  // des identifiants enregistrés par école. L'un des deux vide = routes /school/vdi en 503
+  vdiApiUrl: (process.env.VDI_API_URL || '').replace(/\/+$/, ''),
+  vdiSecretKey: process.env.VDI_SECRET_KEY || '',
 };

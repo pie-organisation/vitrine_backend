@@ -24,6 +24,11 @@ services:
         sync: false
       - key: JOB_SECRET
         sync: false
+      # Postes de travail : URL de l'API Go et secret de chiffrement des identifiants (openssl rand -base64 32)
+      - key: VDI_API_URL
+        sync: false
+      - key: VDI_SECRET_KEY
+        sync: false
       - key: FRAIS_MISE_EN_SERVICE_CENTIMES
         value: "0"
       - key: CUBI_RAISON_SOCIALE

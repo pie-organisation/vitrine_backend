@@ -39,6 +39,7 @@ app.get('/', (req, res) => res.redirect('/api-docs'));
 
 // ── Routes publiques ──────────────────────────────────────────────────────────
 app.use('/auth', authRouter);
+app.use('/interet', require('./routes/interet'));
 
 // ── Routes protégées (JWT requis) ─────────────────────────────────────────────
 app.get('/me', requireAuth, async (req, res, next) => {
@@ -113,6 +114,7 @@ app.post('/me/password', requireAuth, async (req, res, next) => {
 
 app.use('/sessions', requireAuth, sessionsRouter);
 app.use('/licences', requireAuth, licencesRouter);
+app.use('/school/vdi', requireAuth, requireEcoleAdmin, require('./routes/schoolVdi'));
 app.use('/school',   requireAuth, requireEcoleAdmin, schoolRouter);
 
 // ── Routes admin Cubi (JWT + équipe plateforme) ──────────────────────────────
