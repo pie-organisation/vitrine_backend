@@ -598,8 +598,8 @@ router.patch('/demandes/:id', requireCubi('super_admin'), async (req, res, next)
       return res.json({ message: 'Demande refusée' });
     }
 
-    // Les demandes de groupe avec établissements n'ont pas de mot de passe :
-    // chaque responsable reçoit une invitation à la signature du contrat.
+    // Les demandes n'ont pas de mot de passe : le contact (école) ou chaque responsable
+    // d'établissement (groupe) reçoit une invitation à définir le sien à la signature du contrat.
     const etablissementsDemande = demande.etablissements || [];
     const estGroupe = demande.type_demande === 'groupe';
     const refuser = async (message) => {
@@ -609,9 +609,6 @@ router.patch('/demandes/:id', requireCubi('super_admin'), async (req, res, next)
 
     if (estGroupe && !etablissementsDemande.length) {
       return refuser("Cette demande de groupe ne liste aucun établissement : impossible d'établir un contrat (les licences sont rattachées aux établissements). Demande au groupe de soumettre une nouvelle demande.");
-    }
-    if (!estGroupe && !demande.mot_de_passe_hash) {
-      return refuser("Cette demande a été soumise avant la mise à jour du formulaire et n'a pas de mot de passe enregistré. Demande au requérant de soumettre une nouvelle demande d'inscription.");
     }
 
     // Quantités par établissement
@@ -652,13 +649,15 @@ router.patch('/demandes/:id', requireCubi('super_admin'), async (req, res, next)
     let ecoleId = null;
     let groupeId = null;
     let clientContrat;
+    // Pas de connexion au niveau du groupe ni de l'école : ce hash ne sert jamais, mais les colonnes sont NOT NULL.
+    const hashInutilise = demande.mot_de_passe_hash || await bcrypt.hash(generateTempPassword(), 12);
     if (!estGroupe) {
       const { rows: ecoleRows } = await client.query(
         `INSERT INTO ecole
            (nom_complet_ecole, siret, adresse, code_postal, ville, type_licence_id, mot_de_passe_hash, statut)
          VALUES ($1, $2, $3, $4, $5, $6, $7, 'inactif')
          RETURNING id`,
-        [lignes[0].nom, demande.siret, demande.adresse, demande.code_postal, demande.ville, palier.id, demande.mot_de_passe_hash]
+        [lignes[0].nom, demande.siret, demande.adresse, demande.code_postal, demande.ville, palier.id, hashInutilise]
       );
       ecoleId = ecoleRows[0].id;
       lignes[0].ecoleId = ecoleId;
@@ -670,8 +669,6 @@ router.patch('/demandes/:id', requireCubi('super_admin'), async (req, res, next)
         billingContact: `${demande.prenom_contact} ${demande.nom_contact}`,
       };
     } else {
-      // Pas de connexion au niveau du groupe ni de l'école : ces hash ne servent jamais, mais les colonnes sont NOT NULL.
-      const hashInutilise = demande.mot_de_passe_hash || await bcrypt.hash(generateTempPassword(), 12);
       const { rows: groupeRows } = await client.query(
         `INSERT INTO groupe_scolaire
            (nom_du_siege, nom_DAF, prenom_DAF, type_licence_id, mot_de_passe_hash, statut)

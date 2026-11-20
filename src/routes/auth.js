@@ -98,7 +98,7 @@ router.post('/inscription', async (req, res, next) => {
     const {
       type, nom_siege, nom_daf, prenom_daf, nom_ecole, siret, visa_ecole,
       adresse, code_postal, ville, type_licence_id,
-      nom_contact, prenom_contact, email, mot_de_passe, mot_de_passe_confirm,
+      nom_contact, prenom_contact, email,
     } = req.body;
 
     if (!['ecole', 'groupe'].includes(type)) {
@@ -148,19 +148,12 @@ router.post('/inscription', async (req, res, next) => {
 
     const required = {
       nom_siege, nom_daf, prenom_daf, nom_ecole, siret, adresse, code_postal, ville,
-      type_licence_id, nom_contact, prenom_contact, email, mot_de_passe, mot_de_passe_confirm,
+      type_licence_id, nom_contact, prenom_contact, email,
     };
     const missing = Object.entries(required).filter(([, v]) => !v || !String(v).trim());
     if (missing.length) {
       return res.status(422).json({ message: `Champs obligatoires manquants : ${missing.map(([k]) => k).join(', ')}` });
     }
-    if (mot_de_passe !== mot_de_passe_confirm) {
-      return res.status(422).json({ message: 'Les mots de passe ne correspondent pas.' });
-    }
-    if (mot_de_passe.length < 8) {
-      return res.status(422).json({ message: 'Le mot de passe doit contenir au moins 8 caractères.' });
-    }
-
     const siretDigits = String(siret).replace(/\D/g, '');
     if (siretDigits.length !== 14) {
       return res.status(422).json({ message: 'Le SIRET doit contenir exactement 14 chiffres.' });
@@ -186,17 +179,16 @@ router.post('/inscription', async (req, res, next) => {
       return res.status(422).json({ message: 'Licence sélectionnée invalide' });
     }
 
-    const hash = await bcrypt.hash(mot_de_passe, 12);
-
+    // Pas de mot de passe à l'inscription : le contact le définit via l'invitation envoyée à la signature
     await pool.query(
       `INSERT INTO demande_inscription
          (type_demande, nom_siege_ou_ecole, nom_daf, prenom_daf, nom_ecole, siret, visa_ecole,
           adresse, code_postal, ville, type_licence_id, nom_contact, prenom_contact, email,
-          mot_de_passe_hash, nb_licences_estime, statut)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'en_attente')`,
+          nb_licences_estime, statut)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'en_attente')`,
       [
         type, nom_siege, nom_daf, prenom_daf, nom_ecole, siretDigits, visa_ecole || null,
-        adresse, code_postal, ville, type_licence_id, nom_contact, prenom_contact, email, hash, nbLicences,
+        adresse, code_postal, ville, type_licence_id, nom_contact, prenom_contact, email, nbLicences,
       ]
     );
 
